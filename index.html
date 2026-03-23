@@ -1,5 +1,5 @@
-<!DOCTYPE html>
 
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -149,7 +149,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 <div class="main">
 
 <!-- DASHBOARD -->
-
 <div class="page active" id="page-dashboard">
   <h2 style="margin-bottom:16px;font-size:1.1rem">Dashboard</h2>
   <div class="stats-bar">
@@ -177,7 +176,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div>
 
 <!-- EVENTS -->
-
 <div class="page" id="page-events">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
     <h2 style="font-size:1.1rem">Events</h2>
@@ -195,7 +193,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div>
 
 <!-- COMPOSE -->
-
 <div class="page" id="page-compose">
   <h2 style="margin-bottom:16px;font-size:1.1rem">Compose Post</h2>
   <div style="display:grid;grid-template-columns:1fr 400px;gap:20px">
@@ -259,7 +256,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div>
 
 <!-- CHANNELS -->
-
 <div class="page" id="page-channels">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
     <h2 style="font-size:1.1rem">Channel Library</h2>
@@ -275,7 +271,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div>
 
 <!-- SCHEDULER -->
-
 <div class="page" id="page-scheduler">
   <h2 style="margin-bottom:16px;font-size:1.1rem">Auto Scheduler</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -318,7 +313,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div>
 
 <!-- THUMBNAIL -->
-
 <div class="page" id="page-thumbnail">
   <h2 style="margin-bottom:16px;font-size:1.1rem">Thumbnail Builder</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -356,7 +350,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div>
 
 <!-- SETTINGS -->
-
 <div class="page" id="page-settings">
   <h2 style="margin-bottom:16px;font-size:1.1rem">Settings</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -396,7 +389,6 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
 </div><!-- /main -->
 
 <!-- MODALS -->
-
 <div class="modal-overlay" id="modal-preview">
   <div class="modal">
     <div class="modal-head"><h3>Post Preview</h3><button class="close-btn" onclick="closeModal('modal-preview')">✕</button></div>
@@ -478,121 +470,49 @@ const ESPN_BASE            = 'https://site.api.espn.com/apis/site/v2/sports';
 const TSDB_BASE            = 'https://www.thesportsdb.com/api/v1/json/3';
 
 // ═══════════════════════════════════════════════════════════
-// LOGO RESOLUTION SYSTEM
-// Priority: TheSportsDB badge → ESPN CDN rewrite → wsrv proxy → direct
+// LOGO RESOLUTION SYSTEM — now using wsrv.nl proxy only
 // ═══════════════════════════════════════════════════════════
 
-// In-memory logo cache: teamName (lowercase) → URL
-const LOGO_CACHE = {};
-
-// TheSportsDB team search — returns badge URL or ''
-async function fetchLogoFromTSDB(teamName) {
-  if (!teamName) return '';
-  const key = teamName.toLowerCase().trim();
-  if (LOGO_CACHE[key] !== undefined) return LOGO_CACHE[key];
-  try {
-    const res = await fetch(`https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(teamName)}`);
-    const data = await res.json();
-    const team = data?.teams?.[0];
-    const url = team?.strTeamBadge || team?.strTeamLogo || '';
-    LOGO_CACHE[key] = url;
-    return url;
-  } catch {
-    LOGO_CACHE[key] = '';
-    return '';
-  }
-}
-
-// Rewrite ESPN logo URLs to use their public CDN (no CORS issues)
-// ESPN logos: https://a.espncdn.com/i/teamlogos/soccer/500/{espnId}.png
+// rewriteESPNLogo now just returns the original URL (proxy handles it)
 function rewriteESPNLogo(url) {
   if (!url) return '';
-  // Already a good CDN URL
-  if (url.includes('a.espncdn.com') || url.includes('a1.espncdn.com') || url.includes('a2.espncdn.com') || url.includes('a3.espncdn.com') || url.includes('a4.espncdn.com')) {
-    // Convert to higher-res transparent PNG via espncdn
-    return url.replace(/\/\d+\.png/, '/500.png').replace('http://', 'https://');
-  }
+  // Return as is – the proxy will work with any public URL
   return url;
 }
 
-// Proxy URL for <img> tags in the HTML (not canvas)
-function proxyUrl(url, size=200) {
-  if (!url) return '';
-  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-  // ESPN CDN works directly in <img> tags (no canvas CORS issue)
-  if (url.includes('espncdn.com')) return rewriteESPNLogo(url);
-  return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain&n=-1`;
-}
-
-// Resolve the best logo URL for a team — async, used when enriching events
-async function resolveTeamLogo(espnLogoUrl, teamName) {
-  // 1. Try rewriting ESPN URL first (most reliable for ESPN events)
-  const rewritten = rewriteESPNLogo(espnLogoUrl);
-  if (rewritten) return rewritten;
-  // 2. Fall back to TheSportsDB
-  const tsdb = await fetchLogoFromTSDB(teamName);
-  if (tsdb) return tsdb;
-  return '';
-}
-
-// Batch enrich events with resolved logos (runs after fetch)
-async function enrichEventLogos(events) {
-  const matchEvents = events.filter(e => e.type === 'match');
-  // Collect unique teams needing TSDB lookup (those without ESPN logos)
-  const teamsToLookup = new Set();
-  for (const ev of matchEvents) {
-    if (!ev.home.logo) teamsToLookup.add(ev.home.name);
-    if (!ev.away.logo) teamsToLookup.add(ev.away.name);
-  }
-  // Fetch in parallel (max 10 at a time)
-  const teams = [...teamsToLookup];
-  for (let i = 0; i < teams.length; i += 10) {
-    await Promise.allSettled(teams.slice(i, i+10).map(t => fetchLogoFromTSDB(t)));
-  }
-  // Now apply resolved logos
-  for (const ev of matchEvents) {
-    if (!ev.home.logo) ev.home.logo = LOGO_CACHE[ev.home.name.toLowerCase().trim()] || '';
-    if (!ev.away.logo) ev.away.logo = LOGO_CACHE[ev.away.name.toLowerCase().trim()] || '';
-    // Also rewrite ESPN logos
-    if (ev.home.logo) ev.home.logo = rewriteESPNLogo(ev.home.logo) || ev.home.logo;
-    if (ev.away.logo) ev.away.logo = rewriteESPNLogo(ev.away.logo) || ev.away.logo;
-  }
-}
-
-// loadImg for canvas — uses proxy chain
+// loadImg for canvas — uses wsrv.nl proxy chain
 async function loadImg(url, size=200) {
   if (!url) return null;
   if (url.startsWith('data:') || url.startsWith('blob:')) {
     return new Promise(res => { const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=url; });
   }
-  // For canvas we need CORS-safe sources
-  const sources = [
-    // 1. wsrv.nl proxy (most reliable for canvas)
-    `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain&n=-1`,
-    // 2. images.weserv.nl (same service, different endpoint)
-    `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain`,
-    // 3. Direct (may work for some CDNs)
-    url,
-  ];
-  for (const src of sources) {
-    const result = await new Promise(res => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      const t = setTimeout(() => { res(null); }, 6000);
-      img.onload  = () => { clearTimeout(t); res(img); };
-      img.onerror = () => { clearTimeout(t); res(null); };
-      img.src = src;
-    });
-    if (result) return result;
+  // Use wsrv.nl proxy (CORS-safe)
+  const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain&n=-1`;
+  return new Promise(res => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const t = setTimeout(() => { res(null); }, 8000);
+    img.onload  = () => { clearTimeout(t); res(img); };
+    img.onerror = () => { clearTimeout(t); res(null); };
+    img.src = proxyUrl;
+  });
+}
+
+// Batch enrich events — simply ensure logos are set (no async lookups)
+async function enrichEventLogos(events) {
+  // No external fetches – the logoImg function will proxy everything.
+  for (const ev of events) {
+    if (ev.type === 'match') {
+      if (ev.home.logo) ev.home.logo = rewriteESPNLogo(ev.home.logo);
+      if (ev.away.logo) ev.away.logo = rewriteESPNLogo(ev.away.logo);
+    }
   }
-  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
 // AUTO LABEL MAPPING — league → Blogger labels
 // ═══════════════════════════════════════════════════════════
 const LEAGUE_LABELS = {
-  // Soccer
   ucl:          ['UEFA Champions League', 'UCL', 'Football', 'Live Stream', 'Sports 803'],
   uel:          ['UEFA Europa League', 'UEL', 'Football', 'Live Stream', 'Sports 803'],
   uecl:         ['UEFA Conference League', 'UECL', 'Football', 'Live Stream', 'Sports 803'],
@@ -611,34 +531,23 @@ const LEAGUE_LABELS = {
   euro:         ['UEFA Euro', 'European Championship', 'International Football', 'Football', 'Live Stream', 'Sports 803'],
   copaamerica:  ['Copa America', 'International Football', 'Football', 'Live Stream', 'Sports 803'],
   afcon:        ['AFCON', 'Africa Cup of Nations', 'International Football', 'Football', 'Live Stream', 'Sports 803'],
-  // Basketball
   nba:          ['NBA', 'Basketball', 'Live Stream', 'Sports 803'],
   euroleague:   ['EuroLeague', 'Basketball', 'Live Stream', 'Sports 803'],
-  // American Football
   nfl:          ['NFL', 'American Football', 'Live Stream', 'Sports 803'],
-  // Ice Hockey
   nhl:          ['NHL', 'Ice Hockey', 'Live Stream', 'Sports 803'],
-  // Motorsport
   f1:           ['Formula 1', 'F1', 'Motorsport', 'Live Stream', 'Sports 803'],
   motogp:       ['MotoGP', 'Motorsport', 'Live Stream', 'Sports 803'],
   nascar:       ['NASCAR', 'Motorsport', 'Live Stream', 'Sports 803'],
   indycar:      ['IndyCar', 'Motorsport', 'Live Stream', 'Sports 803'],
-  // Golf
   pga:          ['PGA Tour', 'Golf', 'Live Stream', 'Sports 803'],
-  // Cycling
   cycling:      ['Pro Cycling', 'Cycling', 'Live Stream', 'Sports 803'],
-  // Combat
   ufc:          ['UFC', 'MMA', 'Combat Sports', 'Live Stream', 'Sports 803'],
   boxing:       ['Boxing', 'Combat Sports', 'Live Stream', 'Sports 803'],
-  // Tennis
   atp:          ['ATP Tennis', 'Tennis', 'Live Stream', 'Sports 803'],
   wta:          ['WTA Tennis', 'Tennis', 'Live Stream', 'Sports 803'],
-  // Cricket
   cricket:      ['Cricket', 'ICC', 'Live Stream', 'Sports 803'],
-  // Rugby
   rugbyunion:   ['Rugby Union', 'Rugby', 'Live Stream', 'Sports 803'],
   rugbyleague:  ['Rugby League', 'Rugby', 'Live Stream', 'Sports 803'],
-  // Others
   snooker:      ['Snooker', 'WST', 'Live Stream', 'Sports 803'],
   darts:        ['Darts', 'PDC', 'Live Stream', 'Sports 803'],
   wwe:          ['WWE', 'Wrestling', 'Entertainment', 'Live Stream', 'Sports 803'],
@@ -652,14 +561,13 @@ const LEAGUE_LABELS = {
 function getLabelsForEvent(ev) {
   const leagueId = ev?.league?.id || '';
   const labels = LEAGUE_LABELS[leagueId] || ['Sports 803', 'Live Stream'];
-  return [...new Set(labels)]; // dedupe
+  return [...new Set(labels)];
 }
 
 // ═══════════════════════════════════════════════════════════
 // CIRCUIT / RACE IMAGE MAP
 // ═══════════════════════════════════════════════════════════
 const RACE_IMAGES = {
-  // F1 circuits — using Formula1.com official circuit maps
   'bahrain':     'https://www.formula1.com/content/dam/fom-website/2018-redesign-assets/Circuit%20maps%2016x9/Bahrain_Circuit.png.transform/7col/image.png',
   'jeddah':      'https://www.formula1.com/content/dam/fom-website/2018-redesign-assets/Circuit%20maps%2016x9/Saudi_Arabia_Circuit.png.transform/7col/image.png',
   'australian':  'https://www.formula1.com/content/dam/fom-website/2018-redesign-assets/Circuit%20maps%2016x9/Australia_Circuit.png.transform/7col/image.png',
@@ -699,30 +607,22 @@ const RACE_IMAGES = {
   'losail':      'https://www.formula1.com/content/dam/fom-website/2018-redesign-assets/Circuit%20maps%2016x9/Qatar_Circuit.png.transform/7col/image.png',
   'abu dhabi':   'https://www.formula1.com/content/dam/fom-website/2018-redesign-assets/Circuit%20maps%2016x9/Abu_Dhabi_Circuit.png.transform/7col/image.png',
   'yas marina':  'https://www.formula1.com/content/dam/fom-website/2018-redesign-assets/Circuit%20maps%2016x9/Abu_Dhabi_Circuit.png.transform/7col/image.png',
-  // F1 generic fallback
   'formula 1':   'https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/1280px-F1.svg.png',
   'grand prix':  'https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/1280px-F1.svg.png',
-  // MotoGP
   'motogp':      'https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/MotoGP_Logo.svg/1280px-MotoGP_Logo.svg.png',
-  // NASCAR
   'daytona':     'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Daytona_International_Speedway_logo.svg/1280px-Daytona_International_Speedway_logo.svg.png',
   'talladega':   'https://upload.wikimedia.org/wikipedia/en/thumb/1/1c/Talladega_Superspeedway_logo.svg/1280px-Talladega_Superspeedway_logo.svg.png',
   'nascar':      'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/NASCAR_Logo.svg/1280px-NASCAR_Logo.svg.png',
-  // IndyCar
   'indianapolis':'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Indianapolis_Motor_Speedway_logo.svg/1280px-Indianapolis_Motor_Speedway_logo.svg.png',
   'indycar':     'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/IndyCar_Series_logo.svg/1280px-IndyCar_Series_logo.svg.png',
-  // Golf
   'masters':     'https://upload.wikimedia.org/wikipedia/en/thumb/2/27/The_Masters_logo.svg/1280px-The_Masters_logo.svg.png',
   'us open':     'https://upload.wikimedia.org/wikipedia/en/thumb/a/a3/US_Open_Golf_logo.svg/1280px-US_Open_Golf_logo.svg.png',
   'the open':    'https://upload.wikimedia.org/wikipedia/en/thumb/9/9a/The_Open_Championship_logo.svg/1280px-The_Open_Championship_logo.svg.png',
   'pga':         'https://upload.wikimedia.org/wikipedia/en/thumb/c/ca/PGA_Tour_logo.svg/1280px-PGA_Tour_logo.svg.png',
-  // Cycling
   'tour de france':'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Tour_de_France_logo.svg/1280px-Tour_de_France_logo.svg.png',
   'giro':        'https://upload.wikimedia.org/wikipedia/en/thumb/8/8f/Giro_d%27Italia_logo.svg/1280px-Giro_d%27Italia_logo.svg.png',
   'vuelta':      'https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/La_Vuelta_España_logo.svg/1280px-La_Vuelta_España_logo.svg.png',
-  // Snooker
   'snooker':     'https://upload.wikimedia.org/wikipedia/en/thumb/d/d2/World_Snooker_Tour_logo.svg/1280px-World_Snooker_Tour_logo.svg.png',
-  // WWE / Darts
   'wwe':         'https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/WWE_Logo.svg/1280px-WWE_Logo.svg.png',
   'darts':       'https://upload.wikimedia.org/wikipedia/en/thumb/7/7a/PDC_Darts_logo.svg/1280px-PDC_Darts_logo.svg.png',
 };
@@ -730,12 +630,10 @@ const RACE_IMAGES = {
 function getRaceImage(ev) {
   if (!ev) return '';
   const haystack = ((ev.name||'') + ' ' + (ev.venue||'') + ' ' + (ev.location||'')).toLowerCase();
-  // Match against circuit keywords (sorted by key length desc for best match)
   const sorted = Object.keys(RACE_IMAGES).sort((a,b)=>b.length-a.length);
   for (const key of sorted) {
     if (haystack.includes(key)) return RACE_IMAGES[key];
   }
-  // League fallback
   const lid = ev.league?.id || '';
   if (lid === 'f1')       return RACE_IMAGES['formula 1'];
   if (lid === 'motogp')   return RACE_IMAGES['motogp'];
@@ -748,10 +646,9 @@ function getRaceImage(ev) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// LEAGUES — expanded with World Cup & International cups
+// LEAGUES
 // ═══════════════════════════════════════════════════════════
 const LEAGUES = [
-  // SOCCER — Club
   { id:'ucl',          name:'Champions League',      sport:'soccer',     slug:'uefa.champions',     icon:'🏆', type:'match' },
   { id:'uel',          name:'Europa League',          sport:'soccer',     slug:'uefa.europa',        icon:'🟠', type:'match' },
   { id:'uecl',         name:'Conference League',      sport:'soccer',     slug:'uefa.europa.conf',   icon:'🔵', type:'match' },
@@ -766,7 +663,6 @@ const LEAGUES = [
   { id:'scottish',     name:'Scottish Prem',          sport:'soccer',     slug:'sco.1',              icon:'🏴󠁧󠁢󠁳󠁣󠁴󠁿', type:'match' },
   { id:'primeiraliga', name:'Primeira Liga',          sport:'soccer',     slug:'por.1',              icon:'🇵🇹', type:'match' },
   { id:'mls',          name:'MLS',                    sport:'soccer',     slug:'usa.1',              icon:'🇺🇸', type:'match' },
-  // SOCCER — International
   { id:'worldcup',     name:'FIFA World Cup',         sport:'soccer',     slug:'fifa.world',         icon:'🌍', type:'match' },
   { id:'euro',         name:'UEFA Euro',              sport:'soccer',     slug:'uefa.euro',          icon:'🇪🇺', type:'match' },
   { id:'copaamerica',  name:'Copa America',           sport:'soccer',     slug:'conmebol.america',   icon:'🌎', type:'match' },
@@ -776,40 +672,26 @@ const LEAGUES = [
   { id:'uclwomen',     name:'Women\'s UCL',           sport:'soccer',     slug:'uefa.wchampions',    icon:'🏆', type:'match' },
   { id:'wwc',          name:'FIFA Women\'s World Cup',sport:'soccer',     slug:'fifa.wwc',           icon:'🌍', type:'match' },
   { id:'natleague',    name:'UEFA Nations League',    sport:'soccer',     slug:'uefa.nations',       icon:'🏳️', type:'match' },
-  // BASKETBALL
   { id:'nba',          name:'NBA',                    sport:'basketball', slug:'nba',                icon:'🏀', type:'match' },
   { id:'euroleague',   name:'EuroLeague',             sport:'basketball', slug:null, tsdbId:4480,    icon:'🏀', type:'match', source:'tsdb' },
-  // AMERICAN FOOTBALL
   { id:'nfl',          name:'NFL',                    sport:'football',   slug:'nfl',                icon:'🏈', type:'match' },
-  // ICE HOCKEY
   { id:'nhl',          name:'NHL',                    sport:'hockey',     slug:'nhl',                icon:'🏒', type:'match' },
-  // MOTORSPORT
   { id:'f1',           name:'Formula 1',              sport:'racing',     slug:'f1',                 icon:'🏎️', type:'race' },
   { id:'motogp',       name:'MotoGP',                 sport:'racing',     slug:'motogp',             icon:'🏍️', type:'race' },
   { id:'nascar',       name:'NASCAR Cup',             sport:'racing',     slug:'nascar-cup-series',  icon:'🚗', type:'race' },
   { id:'indycar',      name:'IndyCar',                sport:'racing',     slug:'indycar',            icon:'🏁', type:'race' },
-  // GOLF
   { id:'pga',          name:'PGA Tour',               sport:'golf',       slug:'pga',                icon:'⛳', type:'race' },
-  // CYCLING
   { id:'cycling',      name:'Pro Cycling',            sport:'cycling',    slug:null, tsdbId:4471,    icon:'🚴', type:'race', source:'tsdb' },
-  // COMBAT SPORTS
   { id:'ufc',          name:'UFC / MMA',              sport:'mma',        slug:'ufc',                icon:'🥊', type:'match' },
   { id:'boxing',       name:'Boxing',                 sport:'boxing',     slug:null, tsdbId:4443,    icon:'🥋', type:'match', source:'tsdb' },
-  // TENNIS
   { id:'atp',          name:'Tennis ATP',             sport:'tennis',     slug:'atp',                icon:'🎾', type:'match' },
   { id:'wta',          name:'Tennis WTA',             sport:'tennis',     slug:'wta',                icon:'🎾', type:'match' },
-  // CRICKET
   { id:'cricket',      name:'Cricket (ICC)',           sport:'cricket',    slug:'icc',                icon:'🏏', type:'match' },
-  // RUGBY
   { id:'rugbyunion',   name:'Rugby Union',            sport:'rugby',      slug:'internationalrugby', icon:'🏉', type:'match' },
   { id:'rugbyleague',  name:'Rugby League',           sport:'rugby',      slug:'rugbyleague',        icon:'🏉', type:'match' },
-  // SNOOKER
   { id:'snooker',      name:'Snooker (WST)',          sport:'snooker',    slug:null, tsdbId:4508,    icon:'🎱', type:'match', source:'tsdb' },
-  // DARTS
   { id:'darts',        name:'Darts (PDC)',             sport:'darts',      slug:null, tsdbId:4501,    icon:'🎯', type:'match', source:'tsdb' },
-  // ENTERTAINMENT
   { id:'wwe',          name:'WWE',                    sport:'entertainment', slug:null, tsdbId:4478, icon:'💪', type:'match', source:'tsdb' },
-  // FRIENDLIES & INTERNATIONAL
   { id:'intlfriendly', name:'International Friendlies', sport:'soccer',        slug:'fifa.friendly',    icon:'🤝', type:'match' },
   { id:'clubfriendly', name:'Club Friendlies',          sport:'soccer',        slug:'soccer.friendly',  icon:'🤝', type:'match' },
   { id:'worldcupq',    name:'World Cup Qualifiers',     sport:'soccer',        slug:'fifa.worldq.eu',   icon:'🌍', type:'match' },
@@ -971,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// STORAGE
+// STORAGE (unchanged, only modified saveConfig to include new fields)
 // ═══════════════════════════════════════════════════════════
 function saveStorage() {
   localStorage.setItem(STORAGE_KEY_CFG, JSON.stringify({ data: CFG, ts: Date.now() }));
@@ -1074,8 +956,7 @@ async function fetchAllEvents() {
   const results = await Promise.allSettled(active.map(l => fetchLeagueEvents(l)));
   results.forEach(r => { if (r.status==='fulfilled') allEvents.push(...r.value); });
   spinner.style.display = 'none';
-  // Enrich logos: rewrite ESPN URLs + fetch missing logos from TheSportsDB
-  toast('Resolving team logos…', 'info');
+  // Enrich logos: just rewrite ESPN logos if needed
   await enrichEventLogos(allEvents);
   renderLeagueFilterPills();
   renderEventCards(allEvents);
@@ -1119,10 +1000,8 @@ function parseESPNEvent(ev, league) {
   const home = comps.find(c=>c.homeAway==='home') || comps[0] || {};
   const away = comps.find(c=>c.homeAway==='away') || comps[1] || {};
   
-  // Get best available ESPN logo URL (try multiple logo sizes)
   const getESPNLogo = (comp) => {
     const logos = comp.team?.logos || [];
-    // Prefer logos with href that are standard PNG
     const best = logos.find(l=>l.href&&l.width>=40) || logos[0];
     return best?.href || comp.athlete?.flag?.href || '';
   };
@@ -1165,52 +1044,21 @@ function getPostLog(ev)       { return postLog[getEventKey(ev)] || null; }
 function setPostLog(ev, data) { postLog[getEventKey(ev)] = {...(postLog[getEventKey(ev)]||{}), ...data}; saveStorage(); }
 
 // ═══════════════════════════════════════════════════════════
-// RENDER CARDS — with proxied logo images
+// RENDER CARDS — FIXED LOGO FUNCTION
 // ═══════════════════════════════════════════════════════════
-function renderEventCards(events) {
-  const grid = document.getElementById('events-grid');
-  const filtered = activeLeagueFilter==='all' ? events : events.filter(e=>e.league.id===activeLeagueFilter);
-  if (!filtered.length) { grid.innerHTML='<div style="color:var(--muted);grid-column:1/-1;padding:40px;text-align:center">No events found.</div>'; return; }
-  grid.innerHTML = filtered.map(ev => ev.type==='race' ? renderRaceCard(ev) : renderMatchCard(ev)).join('');
-}
 
-// Build smart logo img tag with multi-source fallback
 function logoImg(url, teamName, cls='ec-team-logo') {
-  // Generate a unique ID for async TSDB fallback
   const uid = 'logo_' + Math.random().toString(36).slice(2,8);
-  
-  // Build source list: proxied ESPN → direct ESPN → wsrv proxy → TSDB (async)
-  const sources = [];
-  if (url) {
-    const rewritten = rewriteESPNLogo(url);
-    if (rewritten && rewritten !== url) sources.push(rewritten);
-    sources.push(`https://wsrv.nl/?url=${encodeURIComponent(url)}&w=120&h=120&fit=contain&n=-1`);
-    sources.push(url);
+  let proxyUrl = '';
+  if (url && url.trim()) {
+    proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=120&h=120&fit=contain&n=-1`;
   }
-  
-  const placeholder = `<div class="ec-team-placeholder" style="width:40px;height:40px;background:var(--bg3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--muted)">${teamName?teamName[0].toUpperCase():'?'}</div>`;
-  
-  if (!sources.length) {
-    // No URL at all — try async TSDB fetch and update
-    if (teamName) {
-      setTimeout(async () => {
-        const el = document.getElementById(uid);
-        if (!el) return;
-        const tsdbUrl = await fetchLogoFromTSDB(teamName);
-        if (tsdbUrl) el.outerHTML = `<img class="${cls}" src="${tsdbUrl}" onerror="this.style.display='none'" alt="${teamName}" style="width:40px;height:40px;object-fit:contain" loading="lazy">`;
-      }, 100);
-      return `<span id="${uid}">${placeholder}</span>`;
-    }
-    return placeholder;
+  if (!proxyUrl) {
+    const initial = teamName ? teamName[0].toUpperCase() : '?';
+    return `<div class="ec-team-placeholder" style="width:40px;height:40px;background:var(--bg3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--muted)">${initial}</div>`;
   }
-  
-  // Build img with fallback chain via onerror
-  const fallbackChain = sources.slice(1).map((s,i) => 
-    `this.src='${s.replace(/'/g,"\'")}';`
-  ).join('') + `this.onerror=null;fetchLogoFromTSDB('${(teamName||'').replace(/'/g,"\'")}').then(u=>{if(u)this.src=u;});`;
-  
-  return `<img id="${uid}" class="${cls}" src="${sources[0]}" 
-    onerror="${fallbackChain}"
+  return `<img id="${uid}" class="${cls}" src="${proxyUrl}" 
+    onerror="this.onerror=null; this.outerHTML='<div class=\"ec-team-placeholder\" style=\"width:40px;height:40px;background:var(--bg3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--muted)\">${teamName?teamName[0].toUpperCase():'?'}</div>';" 
     alt="${teamName||''}" style="width:40px;height:40px;object-fit:contain" loading="lazy">`;
 }
 
@@ -1283,6 +1131,20 @@ function renderRaceCard(ev) {
     </div>
   </div>`;
 }
+// helper for race card proxy
+function proxyUrl(url, size=200) {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain&n=-1`;
+}
+
+function renderEventCards(events) {
+  const grid = document.getElementById('events-grid');
+  const filtered = activeLeagueFilter==='all' ? events : events.filter(e=>e.league.id===activeLeagueFilter);
+  if (!filtered.length) { grid.innerHTML='<div style="color:var(--muted);grid-column:1/-1;padding:40px;text-align:center">No events found.</div>'; return; }
+  grid.innerHTML = filtered.map(ev => ev.type==='race' ? renderRaceCard(ev) : renderMatchCard(ev)).join('');
+}
+
 
 // ═══════════════════════════════════════════════════════════
 // AI CONTENT
@@ -2057,7 +1919,5 @@ function toast(msg,type='info'){
   document.getElementById('toast-container').appendChild(t);
   setTimeout(()=>t.remove(),3500);
 }
-</script>
-
 </body>
 </html>
