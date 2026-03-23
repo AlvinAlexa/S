@@ -1455,3 +1455,461 @@ function addRecentPost(title, url, status) {
   list.prepend(div);
   document.getElementById('stat-posted').textContent=parseInt(document.getElementById('stat-posted').textContent||0)+1;
 }
+// ═══════════════════════════════════════════════════════════
+// COMPOSE HELPERS
+// ═══════════════════════════════════════════════════════════
+function previewPost() {
+  document.getElementById('preview-title').textContent=document.getElementById('post-title').value;
+  document.getElementById('preview-body').innerHTML=document.getElementById('post-body').value.replace(/\n/g,'<br>');
+  openModal('modal-preview');
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHANNELS
+// ═══════════════════════════════════════════════════════════
+function renderChannels(filter='') {
+  const tbody=document.getElementById('channels-tbody');
+  const list=channels.filter(c=>!filter||[c.name,c.sport,c.region].some(f=>f.toLowerCase().includes(filter)));
+  tbody.innerHTML=list.map(c=>`
+     <tr><td><strong>${c.name}</strong></td><td style="color:var(--muted)">${c.sport}</td>
+     <td>${c.url?`<a href="${c.url}" target="_blank" style="font-size:.75rem">${c.url.substring(0,38)}…</a>`:'<span style="color:var(--muted)">—</span>'}</td>
+     <td><span style="background:var(--bg3);padding:2px 8px;border-radius:10px;font-size:.72rem">${c.region}</span></td>
+    <td style="display:flex;gap:6px"><button class="btn-ghost btn-sm" onclick="editChannel('${c.id}')">✏️</button><button class="btn btn-sm" style="background:#3d0c0c;padding:4px 8px" onclick="deleteChannel('${c.id}')">✕</button></td></tr>`).join('')
+    || `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">No channels.</td></tr>`;
+  document.getElementById('stat-channels').textContent=channels.length;
+}
+function filterChannels(){renderChannels(document.getElementById('ch-search').value.toLowerCase());}
+function openAddChannel(){editingChannelId=null;document.getElementById('modal-channel-title').textContent='Add Channel';['ch-name','ch-region','ch-sport','ch-url'].forEach(id=>document.getElementById(id).value='');openModal('modal-channel');}
+function editChannel(id){
+  const ch=channels.find(c=>c.id===id);if(!ch)return;
+  editingChannelId=id;document.getElementById('modal-channel-title').textContent='Edit Channel';
+  document.getElementById('ch-name').value=ch.name;document.getElementById('ch-region').value=ch.region;
+  document.getElementById('ch-sport').value=ch.sport;document.getElementById('ch-url').value=ch.url;
+  openModal('modal-channel');
+}
+function saveChannel(){
+  const name=document.getElementById('ch-name').value.trim();
+  if(!name){toast('Name required','error');return;}
+  const obj={name,region:document.getElementById('ch-region').value.trim(),sport:document.getElementById('ch-sport').value.trim(),url:document.getElementById('ch-url').value.trim()};
+  if(editingChannelId){const i=channels.findIndex(c=>c.id===editingChannelId);if(i>-1)channels[i]={...channels[i],...obj};}
+  else channels.push({id:'ch'+Date.now(),...obj});
+  saveStorage();renderChannels();closeModal('modal-channel');toast('Channel saved ✓','success');
+}
+function deleteChannel(id){if(!confirm('Delete?'))return;channels=channels.filter(c=>c.id!==id);saveStorage();renderChannels();toast('Deleted','info');}
+function findChannelsForLeague(leagueId){return channels.filter(c=>c.sport.split(',').map(s=>s.trim()).some(s=>s===leagueId||leagueId.includes(s)||s.includes(leagueId)));}
+
+// ═══════════════════════════════════════════════════════════
+// SCHEDULER
+// ═══════════════════════════════════════════════════════════
+function toggleScheduler(){
+  CFG.schedulerEnabled=document.getElementById('sched-enabled').checked;
+  CFG.schedTiming=parseInt(document.getElementById('sched-timing').value);
+  CFG.schedStatus=document.getElementById('sched-status').value;
+  CFG.autoHighlights=document.getElementById('auto-highlights').checked;
+  saveStorage();
+  if(CFG.schedulerEnabled){runScheduler();toast('Scheduler enabled ✓','success');}
+  else{clearInterval(schedulerInterval);toast('Scheduler disabled','info');}
+}
+function runScheduler(){
+  clearInterval(schedulerInterval);
+  schedulerInterval=setInterval(async()=>{
+    const now=Date.now(),offset=(CFG.schedTiming||60)*60000;
+    for(const ev of allEvents){
+      if(!ev.startTime)continue;
+      const pl=getPostLog(ev);
+      const diff=ev.startTime.getTime()-now;
+      if(!pl?.postId&&diff>0&&diff<=offset){await quickPost(encodeURIComponent(String(ev.id)));await new Promise(r=>setTimeout(r,1000));}
+      if(CFG.autoHighlights&&pl?.postId&&!pl.hasHighlights){
+        const fin=ev.status==='Final'||ev.status==='FT'||ev.status==='Completed'||ev.status==='Official';
+        if(fin)toast(`🎬 ${ev.home?.name||ev.name} finished — open Highlights to post replay`,'info');
+      }
+    }
+    updateSchedQueue();
+  },60000);
+  updateSchedQueue();
+}
+function updateSchedQueue(){
+  const c=document.getElementById('sched-queue'),now=Date.now(),offset=(CFG.schedTiming||60)*60000*24;
+  const pending=allEvents.filter(ev=>ev.startTime&&!getPostLog(ev)?.postId&&ev.startTime.getTime()-now>0&&ev.startTime.getTime()-now<=offset);
+  if(!pending.length){c.innerHTML='<span style="color:var(--muted)">No events in scheduling window.</span>';return;}
+  c.innerHTML=pending.map(ev=>{
+    const n=ev.type==='race'?ev.name:`${ev.home.name} vs ${ev.away.name}`;
+    const ts=ev.startTime.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:.8rem">${ev.league.icon} <strong>${n}</strong> — ${ts}</div>`;
+  }).join('');
+  document.getElementById('stat-scheduled').textContent=pending.length;
+}
+
+// ═══════════════════════════════════════════════════════════
+// LEAGUE TOGGLES
+// ═══════════════════════════════════════════════════════════
+function renderLeagueToggles(){
+  const c=document.getElementById('league-toggles');
+  c.innerHTML=LEAGUES.map(l=>`
+    <label class="toggle">
+      <input type="checkbox" ${CFG.activeLeagues.includes(l.id)?'checked':''} onchange="toggleActiveLeague('${l.id}',this.checked)">
+      <div class="toggle-slider"></div>
+      <span style="font-size:.75rem">${l.icon} ${l.name}</span>
+    </label>`).join('');
+}
+function toggleActiveLeague(id,on){
+  if(on){if(!CFG.activeLeagues.includes(id))CFG.activeLeagues.push(id);}
+  else CFG.activeLeagues=CFG.activeLeagues.filter(x=>x!==id);
+  saveStorage();renderLeagueFilterPills();
+  document.getElementById('stat-leagues').textContent=CFG.activeLeagues.length;
+}
+
+// ═══════════════════════════════════════════════════════════
+// GLOBAL LABELS
+// ═══════════════════════════════════════════════════════════
+function renderGlobalLabels(){
+  const c=document.getElementById('global-labels-tags');
+  c.innerHTML=(CFG.globalLabels||[]).map((l,i)=>`<div class="tag">${l}<span class="remove" onclick="removeLabel(${i})">✕</span></div>`).join('');
+}
+function addGlobalLabel(l){if(!l||CFG.globalLabels.includes(l))return;CFG.globalLabels.push(l);document.getElementById('post-labels').value=CFG.globalLabels.join(', ');renderGlobalLabels();}
+function removeLabel(i){CFG.globalLabels.splice(i,1);renderGlobalLabels();}
+
+// ═══════════════════════════════════════════════════════════
+// THUMBNAIL ENGINE v3 — Fixed CORS proxy + F1 circuit maps
+// ═══════════════════════════════════════════════════════════
+
+function drawS803Badge(ctx, W, H, scale=1) {
+  const pad=Math.round(12*scale), bw=Math.round(120*scale), bh=Math.round(30*scale);
+  const x=W-bw-pad, y=pad, r=6;
+  ctx.save();
+  ctx.globalAlpha=0.92; ctx.fillStyle='#000';
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+bw-r,y);ctx.arcTo(x+bw,y,x+bw,y+r,r);
+  ctx.lineTo(x+bw,y+bh-r);ctx.arcTo(x+bw,y+bh,x+bw-r,y+bh,r);
+  ctx.lineTo(x+r,y+bh);ctx.arcTo(x,y+bh,x,y+bh-r,r);
+  ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();ctx.fill();
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#e63946';
+  ctx.beginPath();ctx.arc(x+pad*0.7+5,y+bh/2,5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font=`800 ${Math.round(13*scale)}px 'Segoe UI',sans-serif`;
+  ctx.textAlign='left';ctx.textBaseline='middle';
+  ctx.fillText('SPORTS', x+pad*0.7+12, y+bh/2);
+  ctx.fillStyle='#39ff14';
+  const sw = ctx.measureText('SPORTS').width;
+  ctx.fillText(' 803', x+pad*0.7+12+sw, y+bh/2);
+  ctx.restore();
+}
+
+function rrect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
+function drawCrest(ctx, img, cx, cy, cR) {
+  ctx.save();
+  ctx.shadowColor='rgba(255,255,255,0.2)';ctx.shadowBlur=20;
+  ctx.beginPath();ctx.arc(cx,cy,cR+2,0,Math.PI*2);
+  ctx.strokeStyle='rgba(255,255,255,0.12)';ctx.lineWidth=2;ctx.stroke();
+  ctx.shadowBlur=0;
+  ctx.beginPath();ctx.arc(cx,cy,cR,0,Math.PI*2);ctx.clip();
+  if(img){
+    ctx.fillStyle='rgba(255,255,255,0.06)';ctx.fill();
+    ctx.drawImage(img,cx-cR,cy-cR,cR*2,cR*2);
+  } else {
+    ctx.fillStyle='rgba(255,255,255,0.07)';ctx.fill();
+    ctx.font=`bold ${Math.round(cR*0.5)}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.3)';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('?',cx,cy);
+  }
+  ctx.restore();
+}
+
+function drawWrappedText(ctx,text,cx,y,maxW,lineH){
+  if(!text)return;
+  const words=text.split(' ');
+  let line='',lines=[];
+  for(const w of words){
+    const t=line?line+' '+w:w;
+    if(ctx.measureText(t).width>maxW&&line){lines.push(line);line=w;}
+    else line=t;
+  }
+  lines.push(line);
+  lines.slice(0,2).forEach((l,i)=>ctx.fillText(l,cx,y+i*lineH));
+}
+
+async function drawMatchThumb(cv, opts) {
+  const {home,away,hLogo,aLogo,league,leagueIcon,datetime,bg1,bg2} = opts;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height,cx=W/2,cy=H/2,scale=W/800;
+
+  // Load both logos in parallel with canvas-safe proxy
+  const [hImg, aImg] = await Promise.all([loadImg(hLogo, 300), loadImg(aLogo, 300)]);
+
+  ctx.clearRect(0,0,W,H);
+
+  // Split background
+  ctx.fillStyle=bg1; ctx.fillRect(0,0,cx,H);
+  ctx.fillStyle=bg2; ctx.fillRect(cx,0,cx,H);
+
+  // Dark diagonal divider
+  ctx.save();ctx.fillStyle='#000';ctx.globalAlpha=0.5;
+  ctx.beginPath();ctx.moveTo(cx-14*scale,0);ctx.lineTo(cx+14*scale,0);ctx.lineTo(cx-14*scale,H);ctx.lineTo(cx-38*scale,H);ctx.closePath();ctx.fill();
+  ctx.globalAlpha=1;ctx.restore();
+
+  // Vignette
+  const vig=ctx.createRadialGradient(cx,cy,H*0.1,cx,cy,H*0.85);
+  vig.addColorStop(0,'rgba(0,0,0,0)');vig.addColorStop(1,'rgba(0,0,0,0.55)');
+  ctx.fillStyle=vig;ctx.fillRect(0,0,W,H);
+
+  // Crests
+  const crestR=Math.round(110*scale);
+  const hCx=Math.round(W*0.26),aCx=Math.round(W*0.74),crestCy=Math.round(H*0.44);
+  drawCrest(ctx,hImg,hCx,crestCy,crestR);
+  drawCrest(ctx,aImg,aCx,crestCy,crestR);
+
+  // VS badge
+  const vsR=Math.round(30*scale);
+  ctx.save();ctx.shadowColor='#e63946';ctx.shadowBlur=18;
+  ctx.fillStyle='#e63946';ctx.beginPath();ctx.arc(cx,cy*0.96,vsR,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;ctx.restore();
+  ctx.fillStyle='#fff';ctx.font=`900 ${Math.round(16*scale)}px 'Segoe UI',sans-serif`;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('VS',cx,cy*0.96);
+
+  // Team names
+  const nameY=crestCy+crestR+Math.round(20*scale);
+  const nameFSize=Math.round(22*scale);
+  ctx.font=`800 ${nameFSize}px 'Segoe UI',sans-serif`;
+  ctx.textBaseline='top';
+  ctx.shadowColor='rgba(0,0,0,0.9)';ctx.shadowBlur=10;
+  ctx.fillStyle='#fff';ctx.textAlign='center';
+  drawWrappedText(ctx,home,hCx,nameY,W*0.38,nameFSize+6);
+  drawWrappedText(ctx,away,aCx,nameY,W*0.38,nameFSize+6);
+  ctx.shadowBlur=0;
+
+  // League pill top-center
+  const lgText=(leagueIcon?leagueIcon+' ':'')+( league||'');
+  if(lgText.trim()){
+    const lgFSize=Math.round(14*scale);
+    ctx.font=`700 ${lgFSize}px 'Segoe UI',sans-serif`;
+    const lgW=ctx.measureText(lgText).width+28*scale,lgH=lgFSize+14*scale;
+    const lgX=cx-lgW/2,lgY=Math.round(18*scale);
+    ctx.save();ctx.globalAlpha=0.88;ctx.fillStyle='#0a0e1a';
+    rrect(ctx,lgX,lgY,lgW,lgH,lgH/2);ctx.fill();
+    ctx.globalAlpha=1;ctx.restore();
+    ctx.fillStyle='#e2e8f0';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(lgText,cx,lgY+lgH/2);
+  }
+
+  // Date/time bottom
+  if(datetime){
+    const dtFSize=Math.round(13*scale);
+    ctx.font=`600 ${dtFSize}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.65)';ctx.textAlign='center';ctx.textBaseline='bottom';
+    ctx.shadowColor='rgba(0,0,0,0.9)';ctx.shadowBlur=8;
+    ctx.fillText('🕐  '+datetime,cx,H-Math.round(16*scale));
+    ctx.shadowBlur=0;
+  }
+  drawS803Badge(ctx,W,H,scale);
+}
+
+async function drawRaceThumb(cv, opts) {
+  const {name,league,leagueIcon,datetime,venue,bg1,bg2,bannerUrl} = opts;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height,cx=W/2,scale=W/800;
+
+  // Load circuit/banner image
+  const bgImg = await loadImg(bannerUrl, 800);
+
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,W,H);
+  g.addColorStop(0,bg1||'#0a0e1a');g.addColorStop(1,bg2||'#1a0010');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+
+  if(bgImg){
+    const iW=W*0.65,iH=H,iX=W-iW;
+    ctx.save();ctx.globalAlpha=0.5;
+    const ir=Math.max(iW/bgImg.width,iH/bgImg.height);
+    const dw=bgImg.width*ir,dh=bgImg.height*ir;
+    ctx.drawImage(bgImg,iX+(iW-dw)/2,(iH-dh)/2,dw,dh);
+    ctx.restore();
+    const fade=ctx.createLinearGradient(iX,0,W,0);
+    fade.addColorStop(0,bg1||'#0a0e1a');
+    fade.addColorStop(0.45,'rgba(10,14,26,0)');
+    fade.addColorStop(1,'rgba(10,14,26,0.35)');
+    ctx.fillStyle=fade;ctx.fillRect(0,0,W,H);
+  }
+
+  // Speed lines
+  ctx.save();ctx.globalAlpha=0.05;
+  for(let i=0;i<8;i++){
+    const ly=H*(0.15+i*0.1),lw=W*(0.25+Math.random()*0.25);
+    ctx.fillStyle='#fff';ctx.fillRect(0,ly,lw,2*scale);
+  }
+  ctx.restore();
+
+  // Accent bar left
+  const barG=ctx.createLinearGradient(0,0,0,H);
+  barG.addColorStop(0,'#e63946');barG.addColorStop(1,'#f4a261');
+  ctx.fillStyle=barG;ctx.fillRect(Math.round(32*scale),Math.round(H*0.12),Math.round(6*scale),Math.round(H*0.76));
+
+  // League badge
+  const lgFSize=Math.round(13*scale);
+  ctx.font=`700 ${lgFSize}px 'Segoe UI',sans-serif`;
+  const lgText=(leagueIcon||'🏎️')+' '+(league||'Motorsport');
+  const lgW=ctx.measureText(lgText).width+24*scale,lgH=lgFSize+14*scale;
+  const lgX=Math.round(48*scale),lgY=Math.round(22*scale);
+  ctx.save();ctx.globalAlpha=0.9;ctx.fillStyle='#e63946';
+  rrect(ctx,lgX,lgY,lgW,lgH,4);ctx.fill();
+  ctx.globalAlpha=1;ctx.restore();
+  ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
+  ctx.fillText(lgText,lgX+12*scale,lgY+lgH/2);
+
+  // Event name headline
+  const titleFSize=Math.round(30*scale);
+  ctx.font=`900 ${titleFSize}px 'Segoe UI',sans-serif`;
+  ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='top';
+  ctx.shadowColor='rgba(0,0,0,0.95)';ctx.shadowBlur=16;
+  const titleWords=(name||'Race Event').split(' ');
+  let titleLines=[],tLine='';
+  const titleMaxW=W*0.55;
+  for(const w of titleWords){
+    const t=tLine?tLine+' '+w:w;
+    if(ctx.measureText(t).width>titleMaxW&&tLine){titleLines.push(tLine);tLine=w;}
+    else tLine=t;
+  }
+  titleLines.push(tLine);
+  const titleStartY=Math.round(H*0.28);
+  titleLines.slice(0,3).forEach((l,i)=>ctx.fillText(l,Math.round(48*scale),titleStartY+i*(titleFSize+6*scale)));
+  ctx.shadowBlur=0;
+
+  if(venue){
+    ctx.font=`400 ${Math.round(14*scale)}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.6)';ctx.textBaseline='top';
+    ctx.fillText('📍 '+venue,Math.round(48*scale),titleStartY+titleLines.length*(titleFSize+6*scale)+8*scale);
+  }
+  if(datetime){
+    ctx.font=`700 ${Math.round(15*scale)}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.9)';ctx.textBaseline='top';ctx.textAlign='left';
+    ctx.shadowColor='rgba(0,0,0,0.9)';ctx.shadowBlur=8;
+    ctx.fillText('🕐  '+datetime,Math.round(48*scale),Math.round(H*0.72));
+    ctx.shadowBlur=0;
+  }
+
+  // Bottom WATCH LIVE bar
+  const barH2=Math.round(44*scale);
+  ctx.save();ctx.globalAlpha=0.92;
+  const botG=ctx.createLinearGradient(0,H-barH2,W,H);
+  botG.addColorStop(0,'#e63946');botG.addColorStop(1,'#c1121f');
+  ctx.fillStyle=botG;ctx.fillRect(0,H-barH2,W,barH2);
+  ctx.globalAlpha=1;ctx.restore();
+  ctx.font=`800 ${Math.round(16*scale)}px 'Segoe UI',sans-serif`;
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('▶  WATCH LIVE ON SPORTS 803',cx,H-barH2/2);
+  drawS803Badge(ctx,W,H,scale);
+}
+
+function buildThumbnail(){
+  const home=document.getElementById('tb-home').value||'Event';
+  const away=document.getElementById('tb-away').value||'';
+  const lg=document.getElementById('tb-league').value||'';
+  const dt=document.getElementById('tb-datetime').value||'';
+  const bg1=document.getElementById('tb-bg1').value;
+  const bg2=document.getElementById('tb-bg2').value;
+  const banner=document.getElementById('tb-banner').value.trim();
+  const hLogo=document.getElementById('tb-home-logo').value.trim();
+  const aLogo=document.getElementById('tb-away-logo').value.trim();
+  const cv=document.getElementById('thumb-canvas-big');
+  if(away){
+    drawMatchThumb(cv,{home,away,hLogo,aLogo,league:lg,leagueIcon:'',datetime:dt,bg1,bg2});
+  } else {
+    drawRaceThumb(cv,{name:home,league:lg,leagueIcon:'',datetime:dt,venue:'',bg1,bg2,bannerUrl:banner});
+  }
+}
+
+async function generateThumbnail(){
+  const title=document.getElementById('post-title').value;
+  const parts=title.split(/\s+vs\s+/i);
+  const cv=document.getElementById('thumb-canvas');
+  if(parts.length>=2){
+    await drawMatchThumb(cv,{home:parts[0].trim(),away:parts[1].split('–')[0].trim(),hLogo:'',aLogo:'',league:'',leagueIcon:'',datetime:'',bg1:'#0d1b2a',bg2:'#1a0020'});
+  } else {
+    await drawRaceThumb(cv,{name:title,league:'',leagueIcon:'',datetime:'',venue:'',bg1:'#0a0e1a',bg2:'#1a0010',bannerUrl:'',});
+  }
+}
+
+async function buildThumbFromEvent(sid){
+  const ev=findEvent(sid);if(!ev)return;
+  const dt=ev.startTime?ev.startTime.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  if(ev.type==='race'){
+    document.getElementById('tb-home').value=ev.name;
+    document.getElementById('tb-away').value='';
+    document.getElementById('tb-league').value=ev.league.name;
+    document.getElementById('tb-home-logo').value='';
+    document.getElementById('tb-away-logo').value='';
+    document.getElementById('tb-banner').value=getRaceImage(ev);
+    document.getElementById('tb-datetime').value=dt;
+    openPage('thumbnail');
+    await drawRaceThumb(document.getElementById('thumb-canvas-big'),{
+      name:ev.name,league:ev.league.name,leagueIcon:ev.league.icon,
+      datetime:dt,venue:ev.venue||'',bg1:'#0a0e1a',bg2:'#1a0a00',bannerUrl:getRaceImage(ev)
+    });
+  } else {
+    document.getElementById('tb-home').value=ev.home.name;
+    document.getElementById('tb-away').value=ev.away.name;
+    document.getElementById('tb-league').value=ev.league.name;
+    document.getElementById('tb-home-logo').value=ev.home.logo;
+    document.getElementById('tb-away-logo').value=ev.away.logo;
+    document.getElementById('tb-banner').value='';
+    document.getElementById('tb-datetime').value=dt;
+    openPage('thumbnail');
+    await drawMatchThumb(document.getElementById('thumb-canvas-big'),{
+      home:ev.home.name,away:ev.away.name,
+      hLogo:ev.home.logo,aLogo:ev.away.logo,
+      league:ev.league.name,leagueIcon:ev.league.icon,datetime:dt,
+      bg1:'#0d1b2a',bg2:'#1a0020'
+    });
+  }
+}
+
+async function uploadToImgbb(){await doImgbbUpload('thumb-canvas','thumb-url');}
+async function uploadThumbFromBuilder(){await doImgbbUpload('thumb-canvas-big','tb-imgbb-url');}
+async function doImgbbUpload(cvId,outId){
+  const key=CFG.imgbbKey;if(!key){toast('imgbb key missing in Settings','error');return;}
+  const base64=document.getElementById(cvId).toDataURL('image/jpeg',.92).split(',')[1];
+  try{
+    toast('Uploading…','info');
+    const fd=new FormData();fd.append('key',key);fd.append('image',base64);
+    const res=await fetch('https://api.imgbb.com/1/upload',{method:'POST',body:fd});
+    const d=await res.json();
+    if(d.success){document.getElementById(outId).value=d.data.url;toast('Uploaded ✓','success');}
+    else throw new Error(d.error?.message||'Upload failed');
+  }catch(e){toast('imgbb error: '+e.message,'error');}
+}
+function downloadThumb(){
+  const a=document.createElement('a');a.download='sports803-thumb.jpg';
+  a.href=document.getElementById('thumb-canvas-big').toDataURL('image/jpeg',.92);a.click();
+}
+
+// ═══════════════════════════════════════════════════════════
+// STAT BAR
+// ═══════════════════════════════════════════════════════════
+function updateStatBar(){
+  document.getElementById('stat-leagues').textContent=CFG.activeLeagues.length;
+  document.getElementById('stat-channels').textContent=channels.length;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MODAL + TOAST
+// ═══════════════════════════════════════════════════════════
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
+function toast(msg,type='info'){
+  const t=document.createElement('div');t.className=`toast ${type}`;t.textContent=msg;
+  document.getElementById('toast-container').appendChild(t);
+  setTimeout(()=>t.remove(),3500);
+}
+</script>
+</body>
+</html>
