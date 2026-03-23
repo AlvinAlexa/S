@@ -1143,3 +1143,315 @@ function renderEventCards(events) {
   if (!filtered.length) { grid.innerHTML='<div style="color:var(--muted);grid-column:1/-1;padding:40px;text-align:center">No events found.</div>'; return; }
   grid.innerHTML = filtered.map(ev => ev.type==='race' ? renderRaceCard(ev) : renderMatchCard(ev)).join('');
 }
+// ═══════════════════════════════════════════════════════════
+// AI CONTENT
+// ═══════════════════════════════════════════════════════════
+function generateAIContent() {
+  const title = document.getElementById('post-title').value;
+  if (!title) { toast('Enter a title first','info'); return; }
+  document.getElementById('post-body').value = buildArticle(title, null);
+  toast('AI content generated ✓','success');
+}
+
+function buildArticle(title, ev) {
+  if (ev && ev.type === 'race') return buildRaceArticle(ev);
+  const player = CFG.playerBase || PLAYER_BASE_DEFAULT;
+  const home   = ev ? ev.home.name : (title.split(/\s+vs\s+/i)[0]?.trim()||'Home Team');
+  const away   = ev ? ev.away.name : (title.split(/\s+vs\s+/i)[1]?.split('–')[0]?.trim()||'Away Team');
+  const league = ev ? ev.league.name : "today's fixture";
+  const leagueId = ev?.league?.id || '';
+  const ts     = ev?.startTime ? ev.startTime.toLocaleString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',timeZoneName:'short'}) : 'today';
+  const chs    = ev ? findChannelsForLeague(ev.league.id) : [];
+  const chList = chs.length ? chs.map(c=>c.name).join(', ') : 'Sports 803';
+  const homeTag = home.replace(/\s+/g,'');
+  const awayTag = away.replace(/\s+/g,'');
+  const lgTag   = league.replace(/\s+/g,'');
+
+  if (leagueId === 'snooker') {
+    return `${pick(PHRASES.match_open)} ${home} takes on ${away} in a gripping ${league} encounter.\n\n${picks(PHRASES.snooker_body,2).join('\n\n')}\n\n${pick(PHRASES.match_context)}\n\n📅 Date & Time: ${ts}\n🎱 Tournament: ${league}\n👤 Players: ${home} vs ${away}\n\n📺 Watch Live:\nLive on ${chList}. Stream free worldwide on Sports 803.\n\n👉 Watch Live: ${player}\n\n${pick(PHRASES.watch_cta)}\n\n#${homeTag} #${awayTag} #${lgTag} #Snooker #Sports803`;
+  }
+  if (leagueId === 'cycling') {
+    return `The professional cycling world turns attention to ${home||league} as another exciting stage race gets underway.\n\n${picks(PHRASES.cycling_body,2).join('\n\n')}\n\n📅 Event Start: ${ts}\n🚴 Race: ${home||league}\n\n📺 Stream free on ${chList} and Sports 803.\n\n👉 Watch Live: ${player}\n\n${pick(PHRASES.watch_cta)}\n\n#Cycling #Sports803`;
+  }
+
+  // International tournaments get special opening
+  const isIntl = ['worldcup','euro','copaamerica','afcon','goldcup','afc','natleague','wwc'].includes(leagueId);
+  const intlOpener = isIntl ? `This ${league} clash is a must-watch as nations battle for international glory on the biggest stage in football.\n\n` : '';
+
+  return `${pick(PHRASES.match_open)} ${home} and ${away} go head-to-head in a highly anticipated ${league} clash.\n\n${intlOpener}${pick(PHRASES.match_context)}\n\n${pick(PHRASES.match_body)} ${pick(PHRASES.match_preview)}\n\n${pick(PHRASES.match_context)}\n\n📅 Date & Time: ${ts}\n🏆 Competition: ${league}\n⚽ Match: ${home} vs ${away}\n\n📺 How to Watch:\nLive broadcast on ${chList}. Stream free worldwide on Sports 803 — no sign-up, no subscription.\n\n👉 Watch Live: ${player}\n\n${pick(PHRASES.watch_cta)}\n\n#${homeTag} #${awayTag} #${lgTag} #Sports803 #LiveStream`;
+}
+
+function buildRaceArticle(ev) {
+  const player = CFG.playerBase || PLAYER_BASE_DEFAULT;
+  const top3   = (ev.entries||[]).slice(0,3).map(e=>e.name).filter(Boolean).join(', ') || 'the top competitors';
+  const ts     = ev.startTime ? ev.startTime.toLocaleString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',timeZoneName:'short'}) : 'this weekend';
+  const chs    = findChannelsForLeague(ev.league.id);
+  const chList = chs.length ? chs.map(c=>c.name).join(', ') : 'Sports 803';
+  const lgTag  = ev.league.name.replace(/\s/g,'');
+  const evTag  = (ev.name||'').replace(/\s/g,'').substring(0,20);
+
+  if (ev.league.id === 'pga') {
+    return `${pick(PHRASES.race_open)} the ${ev.name} — one of the most prestigious events on the professional golf calendar.\n\n${picks(PHRASES.golf_body,3).join('\n\n')}\n\n⛳ Event: ${ev.name}\n📍 Venue: ${ev.venue||'TBC'}${ev.location?', '+ev.location:''}\n🕐 Tee Off: ${ts}\n🏌️ Ones to Watch: ${top3}\n\n📺 Watch Live:\nOn ${chList} and free on Sports 803.\n\n👉 Watch Live: ${player}\n\n${pick(PHRASES.watch_cta)}\n\n#Golf #PGATour #${evTag} #Sports803`;
+  }
+
+  return `${pick(PHRASES.race_open)} the ${ev.name} — a round that has generated enormous anticipation across the ${ev.league.name} paddock.\n\n${ev.league.name} heads to ${ev.venue||'the circuit'}${ev.location?', '+ev.location:''} for what promises to be an unmissable race weekend.\n\n${pick(PHRASES.race_context)}\n\n${picks(PHRASES.race_body,2).join(' ')} ${pick(PHRASES.race_context)}\n\nExpected front runners: ${top3}.\n\n🏎️ Event: ${ev.name}\n📍 Venue: ${ev.venue||'TBC'}${ev.location?', '+ev.location:''}\n🕐 Race Start: ${ts}\n🏁 Front Runners: ${top3}\n\n📺 How to Watch:\nFull race weekend coverage on ${chList}. Stream all sessions free on Sports 803.\n\n👉 Watch Live: ${player}\n\n${pick(PHRASES.watch_cta)}\n\n#${lgTag} #${evTag} #Sports803 #LiveStream #Motorsport`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// HIGHLIGHTS SYSTEM
+// ═══════════════════════════════════════════════════════════
+function populateHighlightsEventSelect() {
+  const sel = document.getElementById('hl-event-select');
+  sel.innerHTML = '<option value="">— choose event —</option>'
+    + allEvents.map((ev,i) => {
+        const label = ev.type==='race' ? ev.name : `${ev.home.name} vs ${ev.away.name}`;
+        return `<option value="${i}">${ev.league.icon} ${label} (${ev.status})</option>`;
+      }).join('');
+}
+function openHighlightsModal() {
+  populateHighlightsEventSelect();
+  document.getElementById('hl-body').value='';
+  document.getElementById('hl-video-url').value='';
+  document.getElementById('hl-existing-post').style.display='none';
+  openModal('modal-highlights');
+}
+function openHighlightsForEvent(sid) {
+  populateHighlightsEventSelect();
+  const idx = allEvents.findIndex(e => String(e.id) === String(decodeURIComponent(sid)));
+  if (idx > -1) document.getElementById('hl-event-select').value = idx;
+  document.getElementById('hl-body').value='';
+  document.getElementById('hl-video-url').value='';
+  onHighlightEventChange();
+  openModal('modal-highlights');
+}
+function onHighlightEventChange() {
+  const idx = parseInt(document.getElementById('hl-event-select').value);
+  if (isNaN(idx)||idx<0) { document.getElementById('hl-existing-post').style.display='none'; return; }
+  const ev = allEvents[idx]; if(!ev) return;
+  const pl = getPostLog(ev);
+  const exDiv = document.getElementById('hl-existing-post');
+  if (pl?.postId) { exDiv.style.display='flex'; document.getElementById('hl-post-link').href=pl.postUrl||'#'; }
+  else exDiv.style.display='none';
+}
+function generateHighlightsText() {
+  const idx = parseInt(document.getElementById('hl-event-select').value);
+  if (isNaN(idx)) { toast('Select an event first','info'); return; }
+  const ev = allEvents[idx]; if(!ev) return;
+  document.getElementById('hl-body').value = buildHighlightsArticle(ev);
+  toast('Highlights text generated ✓','success');
+}
+function buildHighlightsArticle(ev) {
+  const player = CFG.playerBase || PLAYER_BASE_DEFAULT;
+  const hlVideo = document.getElementById('hl-video-url').value.trim();
+  const label = ev.type==='race' ? ev.name : `${ev.home.name} vs ${ev.away.name}`;
+  const league = ev.league.name;
+  const score  = (ev.type!=='race'&&ev.home.score!=='') ? `Final Score: ${ev.home.name} ${ev.home.score} – ${ev.away.score} ${ev.away.name}` : '';
+  const ts     = ev.startTime ? ev.startTime.toLocaleString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}) : 'recently';
+  const lgTag  = league.replace(/\s/g,'');
+  const iframeCode = hlVideo ? buildIframeHtml([hlVideo]) : `<p>🎬 Highlights loading — check back shortly.</p>`;
+  return `${pick(PHRASES.highlights_open)} ${label}.\n\n${score?score+'\n\n':''}${pick(PHRASES.highlights_body)}\n\n${picks(PHRASES.highlights_body,2).join('\n\n')}\n\n🎬 HIGHLIGHTS:\n\n${iframeCode}\n\n📅 Date Played: ${ts}\n🏆 Competition: ${league}\n${ev.type!=='race'?`⚽ Match: ${ev.home.name} vs ${ev.away.name}`:`🏎️ Event: ${ev.name}`}\n\n${pick(PHRASES.watch_cta)}\n\n#${lgTag} #Highlights #Sports803`;
+}
+async function postHighlights() {
+  const idx = parseInt(document.getElementById('hl-event-select').value);
+  if (isNaN(idx)) { toast('Select an event','info'); return; }
+  const ev = allEvents[idx]; if(!ev) return;
+  const hlBody  = document.getElementById('hl-body').value.trim();
+  const hlVideo = document.getElementById('hl-video-url').value.trim();
+  if (!hlBody) { toast('Generate or write highlights text first','info'); return; }
+  if (!accessToken) { toast('Sign in first','error'); return; }
+  if (!CFG.blogId)  { toast('Enter Blog ID in Settings','error'); return; }
+  const label = ev.type==='race' ? ev.name : `${ev.home.name} vs ${ev.away.name}`;
+  const title = `${label} – Highlights & Full Match Replay | Sports 803`;
+  const pl    = getPostLog(ev);
+  const iframeHtml = hlVideo ? buildIframeHtml([hlVideo]) : '';
+  const htmlBody = (hlBody + (iframeHtml ? '\n\n'+iframeHtml : '')).replace(/\n/g,'<br>');
+  const autoLabels = getLabelsForEvent(ev);
+  if (pl?.postId) {
+    try {
+      const res = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${CFG.blogId}/posts/${pl.postId}`,{method:'PUT',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({kind:'blogger#post',id:pl.postId,blog:{id:CFG.blogId},title,content:htmlBody,labels:autoLabels})});
+      if(!res.ok) throw new Error(`Update ${res.status}: ${await res.text()}`);
+      const post = await res.json();
+      setPostLog(ev,{postId:post.id,postUrl:post.url,status:post.status,title,hasHighlights:true,highlightsPostedAt:Date.now()});
+      toast('Post updated with highlights ✓','success');
+      closeModal('modal-highlights'); renderEventCards(allEvents); updateHighlightsStat(); addRecentPost(title,post.url,'🎬 HL');
+    } catch(e){toast('Update failed: '+e.message,'error');}
+  } else {
+    const post = await postToBloggerRaw(title, htmlBody, 'LIVE', autoLabels);
+    if (post) {
+      setPostLog(ev,{postId:post.id,postUrl:post.url,status:'LIVE',title,hasHighlights:true,highlightsPostedAt:Date.now()});
+      toast('Highlights posted ✓','success');
+      closeModal('modal-highlights'); renderEventCards(allEvents); updateHighlightsStat();
+    }
+  }
+}
+async function checkHighlights() {
+  const toHL = allEvents.filter(ev => {
+    const fin = ev.status==='Final'||ev.status==='FT'||ev.status==='Completed'||ev.status==='Official';
+    const pl = getPostLog(ev);
+    return fin&&pl?.postId&&!pl.hasHighlights;
+  });
+  if (!toHL.length) { toast('No finished events pending highlights','info'); return; }
+  toast(`${toHL.length} event(s) ready for highlights…`,'info');
+  populateHighlightsEventSelect();
+  const firstIdx = allEvents.findIndex(ev=>ev.id===toHL[0].id);
+  if (firstIdx>-1) document.getElementById('hl-event-select').value=firstIdx;
+  onHighlightEventChange();
+  openModal('modal-highlights');
+}
+function updateHighlightsStat() {
+  document.getElementById('stat-highlights').textContent = Object.values(postLog).filter(p=>p.hasHighlights).length;
+}
+
+// ═══════════════════════════════════════════════════════════
+// IFRAME STREAM BUILDER
+// ═══════════════════════════════════════════════════════════
+function addStreamSource() {
+  const list = document.getElementById('stream-sources-list');
+  const row  = document.createElement('div');
+  row.className='stream-source-row';
+  row.innerHTML=`<input type="text" placeholder="https://stream-source.com/…" class="mora-input"><button class="btn-ghost btn-sm" onclick="removeStreamSource(this)">✕</button>`;
+  list.appendChild(row);
+  updateIframePreviewBox();
+}
+function removeStreamSource(btn) {
+  const list = document.getElementById('stream-sources-list');
+  if (list.children.length<=1){btn.previousElementSibling.value='';return;}
+  btn.parentElement.remove();
+  updateIframePreviewBox();
+}
+function getMoraUrls() { return Array.from(document.querySelectorAll('.mora-input')).map(i=>i.value.trim()).filter(Boolean); }
+function buildIframeHtml(moraUrls) {
+  const base = (document.getElementById('player-base')?.value||CFG.playerBase||PLAYER_BASE_DEFAULT).trim();
+  const params = moraUrls.map(u=>`mora=${encodeURIComponent(u)}`).join('&');
+  const src = params ? `${base}?${params}` : base;
+  return `<div style="margin:18px 0;"><iframe loading="lazy" class="video-iframe" sandbox="allow-forms allow-pointer-lock allow-same-origin allow-scripts allow-top-navigation" allow="encrypted-media" width="100%" height="500" src="${src}" frameborder="0" scrolling="no" allowfullscreen></iframe></div>`;
+}
+function updateIframePreviewBox() {
+  const urls=getMoraUrls();
+  const box=document.getElementById('iframe-preview-box');
+  if (!urls.length){box.textContent='Add a stream URL above to preview…';return;}
+  box.textContent=buildIframeHtml(urls);
+}
+function buildAndInsertIframe() {
+  const urls=getMoraUrls();
+  if (!urls.length){toast('Add at least one stream URL','info');return;}
+  const code=buildIframeHtml(urls);
+  const body=document.getElementById('post-body');
+  body.value+=(body.value?'\n\n':'')+code;
+  toast('iframe inserted ✓','success');
+}
+function previewIframe() {
+  const urls=getMoraUrls();
+  if (!urls.length){toast('Add at least one stream URL','info');return;}
+  document.getElementById('iframe-preview-render').innerHTML=buildIframeHtml(urls);
+  openModal('modal-iframe-preview');
+}
+
+// ═══════════════════════════════════════════════════════════
+// GENERATE AND FILL (now also auto-sets labels)
+// ═══════════════════════════════════════════════════════════
+function generateAndFill(sid) {
+  const ev = findEvent(sid); if(!ev) return;
+  const title = ev.type==='race'
+    ? `${ev.name} – Race Preview, Schedule & Live Stream | Sports 803`
+    : `${ev.home.name} vs ${ev.away.name} – ${ev.league.name} Preview & Live Stream | Sports 803`;
+  document.getElementById('post-title').value = title;
+  document.getElementById('post-body').value  = buildArticle(title, ev);
+  // Auto-set labels based on league
+  const autoLabels = getLabelsForEvent(ev);
+  document.getElementById('post-labels').value = autoLabels.join(', ');
+  openPage('compose');
+  toast('Content generated with auto-labels!','success');
+}
+function findEvent(sid) {
+  const id = decodeURIComponent(sid);
+  return allEvents.find(e => String(e.id) === String(id)) || null;
+}
+
+// ═══════════════════════════════════════════════════════════
+// OAUTH + BLOGGER
+// ═══════════════════════════════════════════════════════════
+function handleAuth() {
+  if (accessToken) { signOut(); return; }
+  if (!CFG.clientId) { toast('Enter OAuth Client ID in Settings first','error'); return; }
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: CFG.clientId,
+    scope: 'https://www.googleapis.com/auth/blogger',
+    callback: resp => {
+      if (resp.error) { toast('Auth error: '+resp.error,'error'); return; }
+      accessToken = resp.access_token;
+      document.getElementById('auth-status').textContent='🟢 Signed in';
+      document.getElementById('auth-btn').textContent='Sign out';
+      toast('Signed in ✓','success');
+    }
+  });
+  client.requestAccessToken();
+}
+function signOut() {
+  if (accessToken) google.accounts.oauth2.revoke(accessToken,()=>{});
+  accessToken=null;
+  document.getElementById('auth-status').textContent='⚪ Not signed in';
+  document.getElementById('auth-btn').textContent='Sign in with Google';
+  toast('Signed out','info');
+}
+async function postToBlogger() {
+  if (!accessToken){toast('Sign in first','error');return null;}
+  if (!CFG.blogId) {toast('Enter Blog ID in Settings','error');return null;}
+  const t  = document.getElementById('post-title').value.trim();
+  const b  = document.getElementById('post-body').value.trim();
+  const st = document.getElementById('post-status').value;
+  const labelsRaw = document.getElementById('post-labels').value;
+  const labels = labelsRaw.split(',').map(s=>s.trim()).filter(Boolean);
+  if (!t||!b){toast('Title and body required','error');return null;}
+  const thumbUrl = document.getElementById('thumb-url').value.trim();
+  const html = (thumbUrl?`<div><img src="${thumbUrl}" style="max-width:100%;height:auto;border-radius:8px;margin-bottom:16px"></div>\n`:'') + b.replace(/\n/g,'<br>');
+  return postToBloggerRaw(t, html, st, labels);
+}
+async function postToBloggerRaw(title, htmlBody, status, labels) {
+  let url = `https://www.googleapis.com/blogger/v3/blogs/${CFG.blogId}/posts/`;
+  if (status==='DRAFT'||status==='SCHEDULED') url+='?isDraft=true';
+  const payload = {kind:'blogger#post',blog:{id:CFG.blogId},title,content:htmlBody,labels:labels||['sports 803','live stream']};
+  if (status==='SCHEDULED') {
+    const schedTime = document.getElementById('post-schedule-time')?.value;
+    if (schedTime) payload.published = new Date(schedTime).toISOString();
+  }
+  try {
+    const res = await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if (!res.ok) throw new Error(`Blogger ${res.status}: ${await res.text()}`);
+    const post = await res.json();
+    toast(`Posted: "${title}" (${status}) ✓`,'success');
+    addRecentPost(title, post.url, status);
+    return post;
+  } catch(e){toast('Post failed: '+e.message,'error');return null;}
+}
+async function quickPost(sid) {
+  const ev = findEvent(sid); if(!ev) return;
+  const title = ev.type==='race' ? `${ev.name} – Race Preview & Live Stream | Sports 803` : `${ev.home.name} vs ${ev.away.name} – ${ev.league.name} Live Stream | Sports 803`;
+  const body  = buildArticle(title, ev);
+  const html  = body.replace(/\n/g,'<br>');
+  const autoLabels = getLabelsForEvent(ev);
+  const post  = await postToBloggerRaw(title, html, CFG.schedStatus||'DRAFT', autoLabels);
+  if (post) {
+    setPostLog(ev,{postId:post.id,postUrl:post.url,status:post.status||'DRAFT',title});
+    renderEventCards(allEvents);
+    document.getElementById('stat-posted').textContent=parseInt(document.getElementById('stat-posted').textContent||0)+1;
+  }
+}
+async function bulkPostAll() {
+  if (!accessToken){toast('Sign in first','error');return;}
+  const toPost=allEvents.filter(ev=>!getPostLog(ev));
+  if (!toPost.length){toast('All events already posted','info');return;}
+  toast(`Bulk posting ${toPost.length} events…`,'info');
+  let n=0;
+  for (const ev of toPost){await quickPost(encodeURIComponent(String(ev.id)));n++;await new Promise(r=>setTimeout(r,800));}
+  toast(`Done: ${n} posts made`,'success');
+}
+function addRecentPost(title, url, status) {
+  const list=document.getElementById('recent-posts-list');
+  if(list.textContent.includes('No posts'))list.innerHTML='';
+  const div=document.createElement('div');
+  div.style.cssText='padding:7px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px';
+  div.innerHTML=`<span class="post-badge ${(status||'').toLowerCase()}">${status}</span><span style="flex:1;font-size:.82rem">${title}</span>${url?`<a href="${url}" target="_blank" style="font-size:.72rem">View</a>`:''}`;
+  list.prepend(div);
+  document.getElementById('stat-posted').textContent=parseInt(document.getElementById('stat-posted').textContent||0)+1;
+}
