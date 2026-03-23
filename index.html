@@ -235,6 +235,7 @@ label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin-b
           <button class="btn-green btn-sm" onclick="generateThumbnail()">🖼️ Generate</button>
           <button class="btn-blue btn-sm" onclick="uploadToImgbb()">☁️ Upload</button>
         </div>
+        <div style="font-size:.67rem;color:var(--muted);margin-top:5px">Logos load via image proxy — allow 2–3 seconds after clicking Generate</div>
         <div style="margin-top:8px"><label>Image URL</label><input type="text" id="thumb-url" placeholder="Upload to get URL…" readonly></div>
       </div>
       <div class="card">
@@ -762,6 +763,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Live preview of iframe as sources change
   document.getElementById('stream-sources-list').addEventListener('input', () => updateIframePreviewBox());
   document.getElementById('player-base').addEventListener('input', () => updateIframePreviewBox());
+
+  // Auto re-render thumbnail when any thumb input changes (debounced)
+  let thumbDebounce;
+  const thumbInputIds = ['tb-home','tb-away','tb-league','tb-datetime','tb-home-logo','tb-away-logo','tb-banner','tb-bg1','tb-bg2'];
+  thumbInputIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => {
+      clearTimeout(thumbDebounce);
+      thumbDebounce = setTimeout(buildThumbnail, 600);
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -1652,6 +1664,374 @@ function removeLabel(i) { CFG.globalLabels.splice(i,1); renderGlobalLabels(); }
 // ═══════════════════════════════════════════════════════════
 // THUMBNAIL (Canvas 800×420) — with race banner support
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// THUMBNAIL ENGINE v2 — Proper split-design with CORS proxy
+// ═══════════════════════════════════════════════════════════
+
+// CORS proxy: wrap ESPN / external image URLs so canvas can draw them
+function proxyUrl(url) {
+  if (!url) return '';
+  // Already data URI or local — use as-is
+  if (url.startsWith('data:')) return url;
+  // Use allorigins CORS proxy for external images
+  return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=200&h=200&fit=contain&bg=transparent`;
+}
+
+// Load an image through CORS proxy, returns Promise<HTMLImageElement|null>
+function loadImg(url) {
+  return new Promise(resolve => {
+    if (!url) return resolve(null);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload  = () => resolve(img);
+    img.onerror = () => {
+      // Fallback: try without proxy
+      const img2 = new Image();
+      img2.crossOrigin = 'anonymous';
+      img2.onload  = () => resolve(img2);
+      img2.onerror = () => resolve(null);
+      img2.src = url;
+    };
+    img.src = proxyUrl(url);
+  });
+}
+
+// Draw the Sports 803 logo badge (top-right corner)
+function drawS803Badge(ctx, W, H, scale=1) {
+  const pad = Math.round(12*scale);
+  const bw  = Math.round(120*scale);
+  const bh  = Math.round(30*scale);
+  const x   = W - bw - pad;
+  const y   = pad;
+  const r   = 6;
+  // Badge background
+  ctx.save();
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+bw-r,y); ctx.arcTo(x+bw,y,x+bw,y+r,r);
+  ctx.lineTo(x+bw,y+bh-r); ctx.arcTo(x+bw,y+bh,x+bw-r,y+bh,r);
+  ctx.lineTo(x+r,y+bh); ctx.arcTo(x,y+bh,x,y+bh-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath(); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Red record dot
+  const dotR = Math.round(5*scale);
+  ctx.fillStyle='#e63946';
+  ctx.beginPath(); ctx.arc(x+pad*0.7+dotR, y+bh/2, dotR, 0, Math.PI*2); ctx.fill();
+  // Text
+  const fSize = Math.round(13*scale);
+  ctx.fillStyle='#fff'; ctx.font=`800 ${fSize}px 'Segoe UI',sans-serif`;
+  ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillText('SPORTS', x+pad*0.7+dotR*2+4, y+bh/2);
+  ctx.fillStyle='#39ff14'; // neon green like logo
+  ctx.fillText(' 803', x+pad*0.7+dotR*2+4+ctx.measureText('SPORTS').width, y+bh/2);
+  ctx.restore();
+}
+
+// Draw rounded rectangle helper
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
+// Draw crest in a circle with glow — centred at (cx, cy), radius cR
+function drawCrest(ctx, img, cx, cy, cR) {
+  ctx.save();
+  // Subtle glow ring
+  ctx.shadowColor = 'rgba(255,255,255,0.25)';
+  ctx.shadowBlur  = 18;
+  ctx.beginPath(); ctx.arc(cx, cy, cR+2, 0, Math.PI*2);
+  ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.shadowBlur=0;
+  // Clip circle
+  ctx.beginPath(); ctx.arc(cx, cy, cR, 0, Math.PI*2); ctx.clip();
+  if (img) {
+    // Fill circle white first so transparent PNGs look clean
+    ctx.fillStyle='rgba(255,255,255,0.08)'; ctx.fill();
+    ctx.drawImage(img, cx-cR, cy-cR, cR*2, cR*2);
+  } else {
+    // Placeholder
+    ctx.fillStyle='rgba(255,255,255,0.07)'; ctx.fill();
+    ctx.font = `bold ${Math.round(cR*0.5)}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('?', cx, cy);
+  }
+  ctx.restore();
+}
+
+// ── MATCH THUMBNAIL (split-design like PSG vs Chelsea / Roma vs Juve)
+async function drawMatchThumb(cv, opts) {
+  const {home, away, hLogo, aLogo, league, leagueIcon, datetime, bg1, bg2} = opts;
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const cx = W/2, cy = H/2;
+  const scale = W/800;
+
+  // Load images in parallel
+  const [hImg, aImg] = await Promise.all([loadImg(hLogo), loadImg(aLogo)]);
+
+  ctx.clearRect(0,0,W,H);
+
+  // LEFT half — home color
+  ctx.fillStyle = bg1;
+  ctx.fillRect(0, 0, cx, H);
+
+  // RIGHT half — away color
+  ctx.fillStyle = bg2;
+  ctx.fillRect(cx, 0, cx, H);
+
+  // Diagonal divider (like Yahoo Sports style)
+  ctx.save();
+  ctx.fillStyle = '#000';
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath();
+  ctx.moveTo(cx - 30*scale, 0);
+  ctx.lineTo(cx + 30*scale, 0);
+  ctx.lineTo(cx + 30*scale, H);
+  ctx.lineTo(cx - 30*scale, H);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Diagonal slash (sharp divider)
+  ctx.save();
+  ctx.fillStyle = '#000';
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(cx - 12*scale, 0);
+  ctx.lineTo(cx + 12*scale, 0);
+  ctx.lineTo(cx - 12*scale, H);
+  ctx.lineTo(cx - 36*scale, H);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Dark vignette overlay
+  const vig = ctx.createRadialGradient(cx, cy, H*0.1, cx, cy, H*0.85);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vig; ctx.fillRect(0,0,W,H);
+
+  // Crest circles — large and centered in each half
+  const crestR = Math.round(115*scale);
+  const hCx = Math.round(W*0.26);
+  const aCx = Math.round(W*0.74);
+  const crestCy = Math.round(H*0.44);
+
+  drawCrest(ctx, hImg, hCx, crestCy, crestR);
+  drawCrest(ctx, aImg, aCx, crestCy, crestR);
+
+  // VS badge (centre)
+  const vsR = Math.round(32*scale);
+  ctx.save();
+  // Outer glow ring
+  ctx.shadowColor='#e63946'; ctx.shadowBlur=20;
+  ctx.fillStyle='#e63946';
+  ctx.beginPath(); ctx.arc(cx, cy*0.95, vsR, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0; ctx.restore();
+  ctx.fillStyle='#fff'; ctx.font=`900 ${Math.round(18*scale)}px 'Segoe UI',sans-serif`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('VS', cx, cy*0.95);
+
+  // Team names (below crests)
+  const nameY = crestCy + crestR + Math.round(22*scale);
+  const nameFSize = Math.round(22*scale);
+  ctx.font = `800 ${nameFSize}px 'Segoe UI',sans-serif`;
+  ctx.textBaseline = 'top';
+  ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=10;
+
+  // Home name — left half, wrap if long
+  ctx.fillStyle='#fff'; ctx.textAlign='center';
+  drawWrappedText(ctx, home, hCx, nameY, W*0.38, nameFSize+6);
+
+  // Away name — right half
+  ctx.fillStyle='#fff'; ctx.textAlign='center';
+  drawWrappedText(ctx, away, aCx, nameY, W*0.38, nameFSize+6);
+  ctx.shadowBlur=0;
+
+  // League pill (top-center)
+  const lgText = (leagueIcon ? leagueIcon+' ' : '') + (league||'');
+  if (lgText.trim()) {
+    const lgFSize = Math.round(14*scale);
+    ctx.font=`700 ${lgFSize}px 'Segoe UI',sans-serif`;
+    const lgW = ctx.measureText(lgText).width + 28*scale;
+    const lgH = lgFSize + 14*scale;
+    const lgX = cx - lgW/2;
+    const lgY = Math.round(18*scale);
+    // Pill background
+    ctx.save();
+    ctx.globalAlpha=0.85;
+    ctx.fillStyle='#0a0e1a';
+    rrect(ctx, lgX, lgY, lgW, lgH, lgH/2); ctx.fill();
+    ctx.globalAlpha=1; ctx.restore();
+    ctx.fillStyle='#e2e8f0'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(lgText, cx, lgY+lgH/2);
+  }
+
+  // Date/time (bottom-center)
+  if (datetime) {
+    const dtFSize = Math.round(13*scale);
+    ctx.font=`600 ${dtFSize}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.65)'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+    ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=8;
+    ctx.fillText('🕐  '+datetime, cx, H - Math.round(16*scale));
+    ctx.shadowBlur=0;
+  }
+
+  // Sports 803 badge top-right
+  drawS803Badge(ctx, W, H, scale);
+}
+
+// Wrap long team names across 2 lines
+function drawWrappedText(ctx, text, cx, y, maxW, lineH) {
+  if (!text) return;
+  const words = text.split(' ');
+  let line = '', lines = [];
+  for (const w of words) {
+    const test = line ? line+' '+w : w;
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line=w; }
+    else line = test;
+  }
+  lines.push(line);
+  lines.slice(0,2).forEach((l,i) => ctx.fillText(l, cx, y + i*lineH));
+}
+
+// ── RACE THUMBNAIL — circuit map background + race branding, no VS
+async function drawRaceThumb(cv, opts) {
+  const {name, league, leagueIcon, leagueId, datetime, venue, bg1, bg2, bannerUrl, entries} = opts;
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const cx = W/2, cy = H/2;
+  const scale = W/800;
+
+  // Load banner/circuit image
+  const bgImg = await loadImg(bannerUrl);
+
+  ctx.clearRect(0,0,W,H);
+
+  // Background gradient
+  const g = ctx.createLinearGradient(0,0,W,H);
+  g.addColorStop(0, bg1||'#0a0e1a'); g.addColorStop(1, bg2||'#1a0010');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+
+  // Circuit/banner image — full bleed with dark overlay
+  if (bgImg) {
+    // Fit image covering right 60% of canvas (like a poster background)
+    const iW = W*0.65, iH = H;
+    const iX = W - iW;
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    // Scale image to fill area
+    const ir = Math.max(iW/bgImg.width, iH/bgImg.height);
+    const dw = bgImg.width*ir, dh = bgImg.height*ir;
+    ctx.drawImage(bgImg, iX + (iW-dw)/2, (iH-dh)/2, dw, dh);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // Gradient mask over it
+    const fade = ctx.createLinearGradient(iX, 0, W, 0);
+    fade.addColorStop(0, bg1||'#0a0e1a');
+    fade.addColorStop(0.4, 'rgba(10,14,26,0)');
+    fade.addColorStop(1, 'rgba(10,14,26,0.3)');
+    ctx.fillStyle=fade; ctx.fillRect(0,0,W,H);
+  }
+
+  // Speed lines (left side decoration)
+  ctx.save();
+  ctx.globalAlpha=0.06;
+  for(let i=0;i<8;i++){
+    const ly = H*(0.15+i*0.1);
+    const lw = W*(0.3+Math.random()*0.2);
+    ctx.fillStyle='#fff';
+    ctx.fillRect(0,ly,lw,2*scale);
+  }
+  ctx.restore();
+
+  // Accent bar (left vertical)
+  const barW = Math.round(6*scale);
+  const barG = ctx.createLinearGradient(0,0,0,H);
+  barG.addColorStop(0,'#e63946'); barG.addColorStop(1,'#f4a261');
+  ctx.fillStyle=barG; ctx.fillRect(Math.round(32*scale),Math.round(H*0.12),barW,Math.round(H*0.76));
+
+  // League badge (top-left)
+  const lgFSize = Math.round(13*scale);
+  ctx.font=`700 ${lgFSize}px 'Segoe UI',sans-serif`;
+  const lgText  = (leagueIcon||'🏎️')+' '+(league||'Motorsport');
+  const lgW = ctx.measureText(lgText).width + 24*scale;
+  const lgH = lgFSize + 14*scale;
+  const lgX = Math.round(48*scale);
+  const lgY = Math.round(22*scale);
+  ctx.save(); ctx.globalAlpha=0.88; ctx.fillStyle='#e63946';
+  rrect(ctx, lgX, lgY, lgW, lgH, 4); ctx.fill();
+  ctx.globalAlpha=1; ctx.restore();
+  ctx.fillStyle='#fff'; ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillText(lgText, lgX+12*scale, lgY+lgH/2);
+
+  // Event name — main headline (left side)
+  const titleFSize = Math.round(32*scale);
+  ctx.font=`900 ${titleFSize}px 'Segoe UI',sans-serif`;
+  ctx.fillStyle='#fff';
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.shadowColor='rgba(0,0,0,0.95)'; ctx.shadowBlur=16;
+  // Wrap event name
+  const titleWords = (name||'Race Event').split(' ');
+  let titleLines = [], tLine='';
+  const titleMaxW = W*0.55;
+  for(const w of titleWords){
+    const t=tLine?tLine+' '+w:w;
+    if(ctx.measureText(t).width>titleMaxW&&tLine){titleLines.push(tLine);tLine=w;}
+    else tLine=t;
+  }
+  titleLines.push(tLine);
+  const titleStartY = Math.round(H*0.28);
+  titleLines.slice(0,3).forEach((l,i)=>{
+    ctx.fillText(l, Math.round(48*scale), titleStartY + i*(titleFSize+6*scale));
+  });
+  ctx.shadowBlur=0;
+
+  // Venue
+  if (venue) {
+    const vFSize = Math.round(14*scale);
+    ctx.font=`400 ${vFSize}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.6)';
+    ctx.textBaseline='top';
+    ctx.fillText('📍 '+venue, Math.round(48*scale), titleStartY + titleLines.length*(titleFSize+6*scale)+8*scale);
+  }
+
+  // Date/time
+  if (datetime) {
+    const dtFSize = Math.round(15*scale);
+    const dtY = Math.round(H*0.72);
+    ctx.font=`700 ${dtFSize}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.textBaseline='top'; ctx.textAlign='left';
+    ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=8;
+    ctx.fillText('🕐  '+datetime, Math.round(48*scale), dtY);
+    ctx.shadowBlur=0;
+  }
+
+  // Bottom bar — "WATCH LIVE" strip
+  const barH2 = Math.round(44*scale);
+  ctx.save();
+  ctx.globalAlpha=0.92;
+  const botG = ctx.createLinearGradient(0,H-barH2,W,H);
+  botG.addColorStop(0,'#e63946'); botG.addColorStop(1,'#c1121f');
+  ctx.fillStyle=botG; ctx.fillRect(0,H-barH2,W,barH2);
+  ctx.globalAlpha=1; ctx.restore();
+  const wlFSize = Math.round(16*scale);
+  ctx.font=`800 ${wlFSize}px 'Segoe UI',sans-serif`;
+  ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('▶  WATCH LIVE ON SPORTS 803', cx, H-barH2/2);
+
+  // Sports 803 badge top-right
+  drawS803Badge(ctx, W, H, scale);
+}
+
 function buildThumbnail() {
   const home   = document.getElementById('tb-home').value||'Event';
   const away   = document.getElementById('tb-away').value||'';
@@ -1660,71 +2040,34 @@ function buildThumbnail() {
   const bg1    = document.getElementById('tb-bg1').value;
   const bg2    = document.getElementById('tb-bg2').value;
   const banner = document.getElementById('tb-banner').value.trim();
-  drawThumb('thumb-canvas-big',home,away,lg,dt,bg1,bg2,document.getElementById('tb-home-logo').value,document.getElementById('tb-away-logo').value, banner);
-}
-function generateThumbnail() {
-  const title=document.getElementById('post-title').value;
-  const parts=title.split('vs');
-  drawThumb('thumb-canvas',parts[0]?.trim()||'Home',parts[1]?.trim()||'Away','','','#0a0e1a','#1a0010','','','');
-}
-function drawThumb(cid,home,away,lg,dt,bg1,bg2,hLogo,aLogo,bannerUrl) {
-  const cv=document.getElementById(cid), ctx=cv.getContext('2d');
-  const W=cv.width, H=cv.height;
+  const hLogo  = document.getElementById('tb-home-logo').value.trim();
+  const aLogo  = document.getElementById('tb-away-logo').value.trim();
 
-  const doRender = (bgImg) => {
-    if (bgImg) {
-      // Draw banner as background with dark overlay
-      ctx.drawImage(bgImg, 0, 0, W, H);
-      ctx.fillStyle='rgba(10,14,26,.72)'; ctx.fillRect(0,0,W,H);
-    } else {
-      const g=ctx.createLinearGradient(0,0,W,H); g.addColorStop(0,bg1); g.addColorStop(1,bg2);
-      ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    }
-
-    // accent stripe
-    ctx.save(); ctx.globalAlpha=.08; ctx.fillStyle='#e63946';
-    ctx.beginPath(); ctx.moveTo(W*.32,0); ctx.lineTo(W*.68,0); ctx.lineTo(W*.5,H); ctx.closePath(); ctx.fill(); ctx.restore();
-
-    const cx=W/2, cy=H/2, fs=W>500?1:.6;
-    if (away) {
-      ctx.fillStyle='#e63946'; ctx.beginPath(); ctx.arc(cx,cy,Math.round(34*fs),0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#fff'; ctx.font=`bold ${Math.round(22*fs)}px 'Segoe UI',sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText('VS',cx,cy);
-      ctx.fillStyle='#e2e8f0'; ctx.font=`bold ${Math.round(28*fs)}px 'Segoe UI',sans-serif`; ctx.textBaseline='top';
-      ctx.textAlign='center';
-      ctx.shadowColor='rgba(0,0,0,.8)'; ctx.shadowBlur=8;
-      ctx.fillText(home,W*.26,H*.52); ctx.fillText(away,W*.74,H*.52);
-      ctx.shadowBlur=0;
-    } else {
-      ctx.fillStyle='#e2e8f0'; ctx.font=`bold ${Math.round(30*fs)}px 'Segoe UI',sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.shadowColor='rgba(0,0,0,.9)'; ctx.shadowBlur=10;
-      ctx.fillText(home,cx,cy);
-      ctx.shadowBlur=0;
-      ctx.fillStyle='#e63946'; ctx.fillRect(cx-40*fs,cy+34*fs,80*fs,3);
-    }
-    if (lg)  { ctx.font=`${Math.round(15*fs)}px 'Segoe UI',sans-serif`; ctx.fillStyle='#94a3b8'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.shadowColor='rgba(0,0,0,.9)'; ctx.shadowBlur=6; ctx.fillText(lg,cx,H*.1); ctx.shadowBlur=0; }
-    if (dt)  { ctx.font=`${Math.round(13*fs)}px 'Segoe UI',sans-serif`; ctx.fillStyle='#64748b'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(dt,cx,H-.1*H); }
-    ctx.font=`bold ${Math.round(12*fs)}px 'Segoe UI',sans-serif`; ctx.fillStyle='#e63946'; ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('SPORTS 803',W-14,H-12);
-
-    [[hLogo,W*.1,H*.22],[aLogo,W*.78,H*.22]].forEach(([url,x,y])=>{
-      if(!url) return;
-      const img=new Image(); img.crossOrigin='anonymous';
-      img.onload=()=>{ try{ctx.drawImage(img,x,y,Math.round(60*fs),Math.round(60*fs));}catch(e){} };
-      img.src=url;
-    });
-  };
-
-  if (bannerUrl) {
-    const bg=new Image(); bg.crossOrigin='anonymous';
-    bg.onload=()=>doRender(bg);
-    bg.onerror=()=>doRender(null);
-    bg.src=bannerUrl;
+  const cv     = document.getElementById('thumb-canvas-big');
+  if (away) {
+    // Match
+    drawMatchThumb(cv, {home,away,hLogo,aLogo,league:lg,leagueIcon:'',datetime:dt,bg1,bg2});
   } else {
-    doRender(null);
+    // Race / single event
+    drawRaceThumb(cv, {name:home,league:lg,leagueIcon:'',datetime:dt,venue:'',bg1,bg2,bannerUrl:banner,entries:[]});
   }
 }
-function buildThumbFromEvent(sid) {
-  const ev=findEvent(sid); if(!ev) return;
+
+async function generateThumbnail() {
+  const title  = document.getElementById('post-title').value;
+  const parts  = title.split(/\s+vs\s+/i);
+  const cv     = document.getElementById('thumb-canvas');
+  if (parts.length >= 2) {
+    await drawMatchThumb(cv, {home:parts[0].trim(),away:parts[1].split('–')[0].trim(),hLogo:'',aLogo:'',league:'',leagueIcon:'',datetime:'',bg1:'#0d1b2a',bg2:'#1a0020'});
+  } else {
+    await drawRaceThumb(cv, {name:title,league:'',leagueIcon:'',datetime:'',venue:'',bg1:'#0a0e1a',bg2:'#1a0010',bannerUrl:'',entries:[]});
+  }
+}
+
+async function buildThumbFromEvent(sid) {
+  const ev = findEvent(sid); if(!ev) return;
+  const dt = ev.startTime ? ev.startTime.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+
   if (ev.type === 'race') {
     document.getElementById('tb-home').value     = ev.name;
     document.getElementById('tb-away').value     = '';
@@ -1732,7 +2075,13 @@ function buildThumbFromEvent(sid) {
     document.getElementById('tb-home-logo').value= '';
     document.getElementById('tb-away-logo').value= '';
     document.getElementById('tb-banner').value   = getRaceImage(ev);
-    document.getElementById('tb-datetime').value = ev.startTime ? ev.startTime.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    document.getElementById('tb-datetime').value = dt;
+    openPage('thumbnail');
+    await drawRaceThumb(document.getElementById('thumb-canvas-big'), {
+      name:ev.name, league:ev.league.name, leagueIcon:ev.league.icon,
+      leagueId:ev.league.id, datetime:dt, venue:ev.venue||'',
+      bg1:'#0a0e1a', bg2:'#1a0a00', bannerUrl:getRaceImage(ev), entries:ev.entries||[]
+    });
   } else {
     document.getElementById('tb-home').value     = ev.home.name;
     document.getElementById('tb-away').value     = ev.away.name;
@@ -1740,9 +2089,15 @@ function buildThumbFromEvent(sid) {
     document.getElementById('tb-home-logo').value= ev.home.logo;
     document.getElementById('tb-away-logo').value= ev.away.logo;
     document.getElementById('tb-banner').value   = '';
-    document.getElementById('tb-datetime').value = ev.startTime ? ev.startTime.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    document.getElementById('tb-datetime').value = dt;
+    openPage('thumbnail');
+    await drawMatchThumb(document.getElementById('thumb-canvas-big'), {
+      home:ev.home.name, away:ev.away.name,
+      hLogo:ev.home.logo, aLogo:ev.away.logo,
+      league:ev.league.name, leagueIcon:ev.league.icon, datetime:dt,
+      bg1:'#0d1b2a', bg2:'#1a0020'
+    });
   }
-  buildThumbnail(); openPage('thumbnail');
 }
 async function uploadToImgbb()          { await doImgbbUpload('thumb-canvas','thumb-url'); }
 async function uploadThumbFromBuilder() { await doImgbbUpload('thumb-canvas-big','tb-imgbb-url'); }
