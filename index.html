@@ -478,45 +478,114 @@ const ESPN_BASE            = 'https://site.api.espn.com/apis/site/v2/sports';
 const TSDB_BASE            = 'https://www.thesportsdb.com/api/v1/json/3';
 
 // ═══════════════════════════════════════════════════════════
-// CORS PROXY for logos & images
+// LOGO RESOLUTION SYSTEM
+// Priority: TheSportsDB badge → ESPN CDN rewrite → wsrv proxy → direct
 // ═══════════════════════════════════════════════════════════
-// Multiple proxy options — tries in order if one fails
-const PROXIES = [
-  url => `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=200&h=200&fit=contain&n=-1`,
-  url => `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=200&h=200&fit=contain`,
-  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-];
 
+// In-memory logo cache: teamName (lowercase) → URL
+const LOGO_CACHE = {};
+
+// TheSportsDB team search — returns badge URL or ''
+async function fetchLogoFromTSDB(teamName) {
+  if (!teamName) return '';
+  const key = teamName.toLowerCase().trim();
+  if (LOGO_CACHE[key] !== undefined) return LOGO_CACHE[key];
+  try {
+    const res = await fetch(`https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(teamName)}`);
+    const data = await res.json();
+    const team = data?.teams?.[0];
+    const url = team?.strTeamBadge || team?.strTeamLogo || '';
+    LOGO_CACHE[key] = url;
+    return url;
+  } catch {
+    LOGO_CACHE[key] = '';
+    return '';
+  }
+}
+
+// Rewrite ESPN logo URLs to use their public CDN (no CORS issues)
+// ESPN logos: https://a.espncdn.com/i/teamlogos/soccer/500/{espnId}.png
+function rewriteESPNLogo(url) {
+  if (!url) return '';
+  // Already a good CDN URL
+  if (url.includes('a.espncdn.com') || url.includes('a1.espncdn.com') || url.includes('a2.espncdn.com') || url.includes('a3.espncdn.com') || url.includes('a4.espncdn.com')) {
+    // Convert to higher-res transparent PNG via espncdn
+    return url.replace(/\/\d+\.png/, '/500.png').replace('http://', 'https://');
+  }
+  return url;
+}
+
+// Proxy URL for <img> tags in the HTML (not canvas)
 function proxyUrl(url, size=200) {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  // ESPN CDN works directly in <img> tags (no canvas CORS issue)
+  if (url.includes('espncdn.com')) return rewriteESPNLogo(url);
   return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain&n=-1`;
 }
 
-function loadImg(url, size=200) {
-  return new Promise(resolve => {
-    if (!url) return resolve(null);
-    // Try proxies in sequence
-    let proxyIdx = 0;
-    const tryNext = () => {
-      if (proxyIdx >= PROXIES.length) {
-        // Last resort: try direct
-        const imgDirect = new Image();
-        imgDirect.crossOrigin = 'anonymous';
-        imgDirect.onload  = () => resolve(imgDirect);
-        imgDirect.onerror = () => resolve(null);
-        imgDirect.src = url;
-        return;
-      }
-      const proxyFn = PROXIES[proxyIdx++];
+// Resolve the best logo URL for a team — async, used when enriching events
+async function resolveTeamLogo(espnLogoUrl, teamName) {
+  // 1. Try rewriting ESPN URL first (most reliable for ESPN events)
+  const rewritten = rewriteESPNLogo(espnLogoUrl);
+  if (rewritten) return rewritten;
+  // 2. Fall back to TheSportsDB
+  const tsdb = await fetchLogoFromTSDB(teamName);
+  if (tsdb) return tsdb;
+  return '';
+}
+
+// Batch enrich events with resolved logos (runs after fetch)
+async function enrichEventLogos(events) {
+  const matchEvents = events.filter(e => e.type === 'match');
+  // Collect unique teams needing TSDB lookup (those without ESPN logos)
+  const teamsToLookup = new Set();
+  for (const ev of matchEvents) {
+    if (!ev.home.logo) teamsToLookup.add(ev.home.name);
+    if (!ev.away.logo) teamsToLookup.add(ev.away.name);
+  }
+  // Fetch in parallel (max 10 at a time)
+  const teams = [...teamsToLookup];
+  for (let i = 0; i < teams.length; i += 10) {
+    await Promise.allSettled(teams.slice(i, i+10).map(t => fetchLogoFromTSDB(t)));
+  }
+  // Now apply resolved logos
+  for (const ev of matchEvents) {
+    if (!ev.home.logo) ev.home.logo = LOGO_CACHE[ev.home.name.toLowerCase().trim()] || '';
+    if (!ev.away.logo) ev.away.logo = LOGO_CACHE[ev.away.name.toLowerCase().trim()] || '';
+    // Also rewrite ESPN logos
+    if (ev.home.logo) ev.home.logo = rewriteESPNLogo(ev.home.logo) || ev.home.logo;
+    if (ev.away.logo) ev.away.logo = rewriteESPNLogo(ev.away.logo) || ev.away.logo;
+  }
+}
+
+// loadImg for canvas — uses proxy chain
+async function loadImg(url, size=200) {
+  if (!url) return null;
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    return new Promise(res => { const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=url; });
+  }
+  // For canvas we need CORS-safe sources
+  const sources = [
+    // 1. wsrv.nl proxy (most reliable for canvas)
+    `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain&n=-1`,
+    // 2. images.weserv.nl (same service, different endpoint)
+    `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=${size}&h=${size}&fit=contain`,
+    // 3. Direct (may work for some CDNs)
+    url,
+  ];
+  for (const src of sources) {
+    const result = await new Promise(res => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload  = () => resolve(img);
-      img.onerror = () => tryNext();
-      img.src = proxyFn(url);
-    };
-    tryNext();
-  });
+      const t = setTimeout(() => { res(null); }, 6000);
+      img.onload  = () => { clearTimeout(t); res(img); };
+      img.onerror = () => { clearTimeout(t); res(null); };
+      img.src = src;
+    });
+    if (result) return result;
+  }
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -573,6 +642,11 @@ const LEAGUE_LABELS = {
   snooker:      ['Snooker', 'WST', 'Live Stream', 'Sports 803'],
   darts:        ['Darts', 'PDC', 'Live Stream', 'Sports 803'],
   wwe:          ['WWE', 'Wrestling', 'Entertainment', 'Live Stream', 'Sports 803'],
+  intlfriendly: ['International Friendlies', 'Football', 'Live Stream', 'Sports 803'],
+  clubfriendly: ['Club Friendlies', 'Football', 'Pre-Season', 'Live Stream', 'Sports 803'],
+  worldcupq:    ['World Cup Qualifiers', 'International Football', 'Football', 'Live Stream', 'Sports 803'],
+  championsqual:['Champions League Qualifiers', 'UCL', 'Football', 'Live Stream', 'Sports 803'],
+  uefalnat:     ['UEFA Nations League', 'International Football', 'Football', 'Live Stream', 'Sports 803'],
 };
 
 function getLabelsForEvent(ev) {
@@ -735,6 +809,11 @@ const LEAGUES = [
   { id:'darts',        name:'Darts (PDC)',             sport:'darts',      slug:null, tsdbId:4501,    icon:'🎯', type:'match', source:'tsdb' },
   // ENTERTAINMENT
   { id:'wwe',          name:'WWE',                    sport:'entertainment', slug:null, tsdbId:4478, icon:'💪', type:'match', source:'tsdb' },
+  // FRIENDLIES & INTERNATIONAL
+  { id:'intlfriendly', name:'International Friendlies', sport:'soccer',        slug:'fifa.friendly',    icon:'🤝', type:'match' },
+  { id:'clubfriendly', name:'Club Friendlies',          sport:'soccer',        slug:'soccer.friendly',  icon:'🤝', type:'match' },
+  { id:'worldcupq',    name:'World Cup Qualifiers',     sport:'soccer',        slug:'fifa.worldq.eu',   icon:'🌍', type:'match' },
+  { id:'championsqual',name:'Champions League Qualif.', sport:'soccer',        slug:'uefa.champions.qual',icon:'🏆',type:'match' },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -856,7 +935,7 @@ let CFG = {
   highlightsUrl: '',
   playerBase: PLAYER_BASE_DEFAULT,
   globalLabels: ['sports 803','live stream'],
-  activeLeagues: ['ucl','epl','laliga','seriea','bundesliga','f1','nba','ufc','atp','worldcup'],
+  activeLeagues: ['ucl','epl','laliga','seriea','bundesliga','f1','nba','ufc','atp','worldcup','intlfriendly','clubfriendly'],
   schedulerEnabled: false, schedTiming: 60, schedStatus: 'DRAFT',
   autoHighlights: false,
 };
@@ -995,6 +1074,9 @@ async function fetchAllEvents() {
   const results = await Promise.allSettled(active.map(l => fetchLeagueEvents(l)));
   results.forEach(r => { if (r.status==='fulfilled') allEvents.push(...r.value); });
   spinner.style.display = 'none';
+  // Enrich logos: rewrite ESPN URLs + fetch missing logos from TheSportsDB
+  toast('Resolving team logos…', 'info');
+  await enrichEventLogos(allEvents);
   renderLeagueFilterPills();
   renderEventCards(allEvents);
   document.getElementById('stat-events').textContent = allEvents.length;
@@ -1036,10 +1118,19 @@ function parseESPNEvent(ev, league) {
 
   const home = comps.find(c=>c.homeAway==='home') || comps[0] || {};
   const away = comps.find(c=>c.homeAway==='away') || comps[1] || {};
+  
+  // Get best available ESPN logo URL (try multiple logo sizes)
+  const getESPNLogo = (comp) => {
+    const logos = comp.team?.logos || [];
+    // Prefer logos with href that are standard PNG
+    const best = logos.find(l=>l.href&&l.width>=40) || logos[0];
+    return best?.href || comp.athlete?.flag?.href || '';
+  };
+  
   return {
     id: ev.id, league, type:'match',
-    home:{ name: home.team?.displayName||home.athlete?.displayName||'TBD', logo: home.team?.logos?.[0]?.href||home.athlete?.flag?.href||'', score: home.score??'' },
-    away:{ name: away.team?.displayName||away.athlete?.displayName||'TBD', logo: away.team?.logos?.[0]?.href||away.athlete?.flag?.href||'', score: away.score??'' },
+    home:{ name: home.team?.displayName||home.athlete?.displayName||'TBD', logo: getESPNLogo(home), score: home.score??'' },
+    away:{ name: away.team?.displayName||away.athlete?.displayName||'TBD', logo: getESPNLogo(away), score: away.score??'' },
     status, startTime, raw: ev
   };
 }
@@ -1083,13 +1174,44 @@ function renderEventCards(events) {
   grid.innerHTML = filtered.map(ev => ev.type==='race' ? renderRaceCard(ev) : renderMatchCard(ev)).join('');
 }
 
-// Build proxied img tag — falls back to emoji placeholder on error
+// Build smart logo img tag with multi-source fallback
 function logoImg(url, teamName, cls='ec-team-logo') {
-  if (!url) return `<div class="${cls.replace('logo','placeholder')} ec-team-placeholder">${teamName?teamName[0]:'?'}</div>`;
-  const proxied = proxyUrl(url, 80);
-  return `<img class="${cls}" src="${proxied}" 
-    onerror="this.onerror=null;this.src='${url}';this.onerror=()=>{this.style.display='none';this.insertAdjacentHTML('afterend','<div class=\\'ec-team-placeholder\\'>${teamName?teamName[0]:'?'}</div>')}" 
-    alt="${teamName||''}" loading="lazy">`;
+  // Generate a unique ID for async TSDB fallback
+  const uid = 'logo_' + Math.random().toString(36).slice(2,8);
+  
+  // Build source list: proxied ESPN → direct ESPN → wsrv proxy → TSDB (async)
+  const sources = [];
+  if (url) {
+    const rewritten = rewriteESPNLogo(url);
+    if (rewritten && rewritten !== url) sources.push(rewritten);
+    sources.push(`https://wsrv.nl/?url=${encodeURIComponent(url)}&w=120&h=120&fit=contain&n=-1`);
+    sources.push(url);
+  }
+  
+  const placeholder = `<div class="ec-team-placeholder" style="width:40px;height:40px;background:var(--bg3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--muted)">${teamName?teamName[0].toUpperCase():'?'}</div>`;
+  
+  if (!sources.length) {
+    // No URL at all — try async TSDB fetch and update
+    if (teamName) {
+      setTimeout(async () => {
+        const el = document.getElementById(uid);
+        if (!el) return;
+        const tsdbUrl = await fetchLogoFromTSDB(teamName);
+        if (tsdbUrl) el.outerHTML = `<img class="${cls}" src="${tsdbUrl}" onerror="this.style.display='none'" alt="${teamName}" style="width:40px;height:40px;object-fit:contain" loading="lazy">`;
+      }, 100);
+      return `<span id="${uid}">${placeholder}</span>`;
+    }
+    return placeholder;
+  }
+  
+  // Build img with fallback chain via onerror
+  const fallbackChain = sources.slice(1).map((s,i) => 
+    `this.src='${s.replace(/'/g,"\'")}';`
+  ).join('') + `this.onerror=null;fetchLogoFromTSDB('${(teamName||'').replace(/'/g,"\'")}').then(u=>{if(u)this.src=u;});`;
+  
+  return `<img id="${uid}" class="${cls}" src="${sources[0]}" 
+    onerror="${fallbackChain}"
+    alt="${teamName||''}" style="width:40px;height:40px;object-fit:contain" loading="lazy">`;
 }
 
 function renderMatchCard(ev) {
@@ -1593,30 +1715,9 @@ function removeLabel(i){CFG.globalLabels.splice(i,1);renderGlobalLabels();}
 // THUMBNAIL ENGINE v3 — Fixed CORS proxy + F1 circuit maps
 // ═══════════════════════════════════════════════════════════
 
-// Load image via proxy with fallback chain
+// loadImgForCanvas delegates to loadImg (shared proxy chain)
 async function loadImgForCanvas(url) {
-  if (!url) return null;
-  if (url.startsWith('data:')) {
-    return new Promise(res => { const i=new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=url; });
-  }
-  // Try proxy chain
-  const proxies = [
-    `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=300&h=300&fit=contain&n=-1`,
-    `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=300&h=300`,
-    url, // direct as last resort
-  ];
-  for (const src of proxies) {
-    const result = await new Promise(res => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      const t = setTimeout(() => res(null), 5000);
-      img.onload  = () => { clearTimeout(t); res(img); };
-      img.onerror = () => { clearTimeout(t); res(null); };
-      img.src = src;
-    });
-    if (result) return result;
-  }
-  return null;
+  return loadImg(url, 300);
 }
 
 function drawS803Badge(ctx, W, H, scale=1) {
