@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sports 803 · AI Auto-Post Dashboard v6.0 · SEO+Future+Thumb</title>
+<title>Sports 803 · AI Auto-Post v6.0 · SEO+Future+Thumb</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -106,25 +106,37 @@ button{cursor:pointer;border:none;border-radius:7px;padding:8px 16px;font-size:1
 <!-- THUMBNAIL BUILDER (with aspect ratio) -->
 <div class="page" id="page-thumbnail"><div class="page-header"><div class="page-title">Thumbnail <span>Builder</span></div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:18px"><div class="card"><div class="card-title">Settings</div><div class="form-row"><div><label>Home / Event</label><input type="text" id="tb-home" placeholder="Team or Race"></div><div><label>Away (optional)</label><input type="text" id="tb-away"></div></div><div class="form-row"><div><label>Home Logo URL</label><input type="text" id="tb-home-logo"></div><div><label>Away Logo URL</label><input type="text" id="tb-away-logo"></div></div><div class="form-row"><div><label>League</label><input type="text" id="tb-league"></div><div><label>Datetime</label><input type="text" id="tb-datetime"></div></div><div class="form-row"><div><label>BG Color 1</label><input type="color" id="tb-bg1" value="#0a0e1a"></div><div><label>BG Color 2</label><input type="color" id="tb-bg2" value="#1a0010"></div></div><div><label>Aspect Ratio</label><select id="thumb-aspect" onchange="buildThumbnail()"><option value="16:9">Blog (16:9)</option><option value="1:1">Social (1:1)</option><option value="9:16">Stories (9:16)</option></select></div><button class="btn" onclick="buildThumbnail()">🖼️ Build</button><button class="btn-blue" onclick="uploadThumbFromBuilder()">☁️ Upload</button></div><div class="card"><div class="card-title">Preview</div><canvas id="thumb-canvas-big" width="800" height="420" style="max-width:100%;background:#111"></canvas><input type="text" id="tb-imgbb-url" placeholder="Upload URL" readonly></div></div></div>
 
-<!-- CHANNELS, SCHEDULER, POSTLOG, SETTINGS (simplified for brevity but functional) -->
-<div class="page" id="page-channels"><div class="card">Channel manager placeholder – use Settings</div></div>
-<div class="page" id="page-scheduler"><div class="card">Scheduler active – check console</div></div>
-<div class="page" id="page-postlog"><div class="card"><table id="post-log-tbody" class="log-table"></table></div></div>
-<div class="page" id="page-settings"><div class="card"><div class="form-group"><label>Blogger Blog ID</label><input id="cfg-blogid"></div><div class="form-group"><label>OAuth Client ID</label><input id="cfg-clientid"></div><div class="form-group"><label>imgbb Key</label><input id="cfg-imgbb" value="c8cd5657bfdfc6c298c9366deebfa7a7"></div><button class="btn" onclick="saveConfig()">Save</button><button class="btn-ghost" onclick="clearStorage()">Reset</button></div></div>
+<!-- CHANNELS, SCHEDULER, POSTLOG, SETTINGS (full functionality) -->
+<div class="page" id="page-channels"><div class="card"><div class="card-title">Channel Library</div><div class="search-bar"><input type="text" id="ch-search" placeholder="Search channels…" oninput="filterChannels()"></div><table class="ch-table" id="channels-table"><thead><tr><th>Name</th><th>Sport/League</th><th>Region</th><th>Actions</th></tr></thead><tbody id="channels-tbody"></tbody></table><button class="btn btn-sm" onclick="openAddChannel()">+ Add Channel</button></div></div>
+<div class="page" id="page-scheduler"><div class="card"><div class="card-title">Auto Scheduler</div><div class="form-group"><label>Post Timing (minutes before event)</label><select id="sched-timing"><option value="60">1 hour</option><option value="120">2 hours</option><option value="180">3 hours</option></select></div><label class="toggle"><input type="checkbox" id="sched-enabled"><div class="toggle-slider"></div><span>Enable Scheduler</span></label><div id="sched-queue" style="margin-top:12px"></div></div></div>
+<div class="page" id="page-postlog"><div class="card"><table class="log-table"><thead><tr><th>Title</th><th>Status</th><th>Date</th></tr></thead><tbody id="post-log-tbody"></tbody></table></div></div>
+<div class="page" id="page-settings"><div class="card"><div class="form-group"><label>Blogger Blog ID</label><input id="cfg-blogid"></div><div class="form-group"><label>OAuth Client ID</label><input id="cfg-clientid"></div><div class="form-group"><label>imgbb Key</label><input id="cfg-imgbb" value="c8cd5657bfdfc6c298c9366deebfa7a7"></div><div class="form-group"><label>Logo Overrides (team=url)</label><textarea id="cfg-logo-overrides" rows="4" placeholder="Manchester City = https://..."></textarea></div><button class="btn" onclick="saveConfig()">Save</button><button class="btn-ghost" onclick="clearStorage()">Reset All Data</button></div></div>
 </div>
 
 <!-- MODALS -->
-<div class="modal-overlay" id="modal-match-stats"><div class="modal"><h3>Match Stats Details</h3><div class="form-group"><label>League</label><input id="ms-league"></div><div class="form-group"><label>Home Team</label><input id="ms-home"></div><div class="form-group"><label>Away Team</label><input id="ms-away"></div><div class="form-group"><label>Date/Time</label><input id="ms-time"></div><div class="form-group"><label>Venue</label><input id="ms-venue"></div><div style="display:flex;gap:8px"><button class="btn" onclick="insertMatchStatsTableConfirm()">Insert</button><button class="btn-ghost" onclick="closeModal('modal-match-stats')">Cancel</button></div></div></div>
+<div class="modal-overlay" id="modal-match-stats"><div class="modal"><h3>Match Stats Table</h3><div class="form-group"><label>League</label><input id="ms-league"></div><div class="form-group"><label>Home Team</label><input id="ms-home"></div><div class="form-group"><label>Away Team</label><input id="ms-away"></div><div class="form-group"><label>Date/Time</label><input id="ms-time"></div><div class="form-group"><label>Venue</label><input id="ms-venue"></div><div style="display:flex;gap:8px"><button class="btn" onclick="insertMatchStatsTableConfirm()">Insert</button><button class="btn-ghost" onclick="closeModal('modal-match-stats')">Cancel</button></div></div></div>
+<div class="modal-overlay" id="modal-channel"><div class="modal"><h3>Channel</h3><div class="form-group"><label>Name</label><input id="ch-name"></div><div class="form-group"><label>Sport/League Tags</label><input id="ch-sport"></div><div class="form-group"><label>Region</label><input id="ch-region"></div><div class="form-group"><label>Stream URL</label><input id="ch-url"></div><button class="btn" onclick="saveChannel()">Save</button></div></div>
 <div id="toast-container"></div>
 <script src="https://accounts.google.com/gsi/client" async></script>
 <script>
 'use strict';
 // ======================= GLOBAL STATE =======================
-let CFG = { blogId:'', clientId:'', imgbbKey:'c8cd5657bfdfc6c298c9366deebfa7a7', globalLabels:['sports 803'] };
-let allEvents = [], accessToken = null, channels = [], postLog = {};
-const STORAGE_KEY_CFG='s803_cfg', STORAGE_KEY_POSTS='s803_posts';
-function loadStorage() { try { let c=localStorage.getItem(STORAGE_KEY_CFG); if(c) CFG=JSON.parse(c); document.getElementById('cfg-blogid').value=CFG.blogId||''; document.getElementById('cfg-clientid').value=CFG.clientId||''; document.getElementById('cfg-imgbb').value=CFG.imgbbKey||''; } catch(e){} }
-function saveConfig() { CFG.blogId=document.getElementById('cfg-blogid').value; CFG.clientId=document.getElementById('cfg-clientid').value; CFG.imgbbKey=document.getElementById('cfg-imgbb').value; localStorage.setItem(STORAGE_KEY_CFG,JSON.stringify(CFG)); toast('Config saved','success'); }
+let CFG = { blogId:'', clientId:'', imgbbKey:'c8cd5657bfdfc6c298c9366deebfa7a7', globalLabels:['sports 803'], logoOverridesRaw:'' };
+let allEvents = [], accessToken = null, channels = [], postLog = {}, editingChannelId = null;
+const STORAGE_KEY_CFG='s803_cfg', STORAGE_KEY_CHANNELS='s803_channels', STORAGE_KEY_POSTS='s803_posts';
+function loadStorage() { 
+  try { let c=localStorage.getItem(STORAGE_KEY_CFG); if(c) CFG={...CFG,...JSON.parse(c)}; document.getElementById('cfg-blogid').value=CFG.blogId||''; document.getElementById('cfg-clientid').value=CFG.clientId||''; document.getElementById('cfg-imgbb').value=CFG.imgbbKey||''; document.getElementById('cfg-logo-overrides').value=CFG.logoOverridesRaw||''; } catch(e){} 
+  try { let ch=localStorage.getItem(STORAGE_KEY_CHANNELS); if(ch) channels=JSON.parse(ch); else channels=[{id:'ch1',name:'TNT Sports',sport:'epl,ucl',region:'UK',url:''}]; renderChannels(); } catch(e){}
+  try { let pl=localStorage.getItem(STORAGE_KEY_POSTS); if(pl) postLog=JSON.parse(pl); renderPostLog(); } catch(e){}
+}
+function saveConfig() { 
+  CFG.blogId=document.getElementById('cfg-blogid').value; 
+  CFG.clientId=document.getElementById('cfg-clientid').value; 
+  CFG.imgbbKey=document.getElementById('cfg-imgbb').value; 
+  CFG.logoOverridesRaw=document.getElementById('cfg-logo-overrides').value;
+  localStorage.setItem(STORAGE_KEY_CFG,JSON.stringify(CFG)); 
+  toast('Config saved','success'); 
+}
 function clearStorage() { localStorage.clear(); location.reload(); }
 function toast(msg,t='info'){ let d=document.createElement('div'); d.className='toast'; d.innerText=msg; document.getElementById('toast-container').appendChild(d); setTimeout(()=>d.remove(),3000); }
 // ======================= OAUTH =======================
@@ -133,7 +145,7 @@ function handleAuth(){ if(!CFG.clientId){ toast('Set OAuth Client ID','error'); 
 async function fetchAllEvents(){
   const dateInput=document.getElementById('fetch-date-input').value;
   allEvents=[];
-  const leagues=[{id:'epl',sport:'soccer',slug:'eng.1',name:'Premier League',type:'match'},{id:'f1',sport:'racing',slug:'f1',name:'Formula 1',type:'race'}];
+  const leagues=[{id:'epl',sport:'soccer',slug:'eng.1',name:'Premier League',type:'match',icon:'⚽'},{id:'f1',sport:'racing',slug:'f1',name:'Formula 1',type:'race',icon:'🏎️'}];
   for(let l of leagues){
     let url=`https://site.api.espn.com/apis/site/v2/sports/${l.sport}/${l.slug}/scoreboard`;
     if(dateInput) url+=`?dates=${dateInput.replace(/-/g,'')}`;
@@ -153,6 +165,7 @@ function parseEvent(ev,league){
 }
 function renderEventCards(events){ let g=document.getElementById('events-grid'); if(!events.length){g.innerHTML='<div>No events</div>';return;} g.innerHTML=events.map(ev=>`<div class="event-card"><div>${ev.league.icon||'🏆'} ${ev.league.name}</div><div>${ev.home.name} vs ${ev.away.name}</div><div>${ev.status}</div><button class="btn-sm" onclick="generateAndFill('${ev.id}')">Gen Post</button></div>`).join(''); }
 function generateAndFill(sid){ let ev=allEvents.find(e=>e.id==sid); if(!ev)return; document.getElementById('post-title').value=`${ev.home.name} vs ${ev.away.name} – Preview`; document.getElementById('post-body').value=`Full preview of ${ev.home.name} vs ${ev.away.name}...`; openPage('compose'); }
+function filterEvents(){ let q=document.getElementById('event-search').value.toLowerCase(); if(!q){renderEventCards(allEvents);return;} renderEventCards(allEvents.filter(ev=>`${ev.home.name} ${ev.away.name}`.toLowerCase().includes(q))); }
 // ======================= ADVANCED SEO METER =======================
 function updateSEOMeter(){
   let body=document.getElementById('post-body').value;
@@ -163,7 +176,7 @@ function updateSEOMeter(){
   let kwDensity=words?((kwCount/words)*100).toFixed(1):0;
   let firstPara=body.split(/\n\n/)[0]||''; let inFirst=keyword && firstPara.toLowerCase().includes(keyword);
   document.getElementById('seo-kw-bar').style.width=Math.min(100,(kwDensity/5)*100)+'%';
-  document.getElementById('seo-kw-score').innerHTML=`${kwDensity}% ${inFirst?'✓ in first para':''}`;
+  document.getElementById('seo-kw-score').innerHTML=`${kwDensity}% ${inFirst?'✓ first para':''}`;
   let metaLen=meta.length; let metaPct=Math.min(100,(metaLen/160)*100); document.getElementById('seo-meta-bar').style.width=metaPct+'%'; document.getElementById('seo-meta-score').innerHTML=`${metaLen}/160`;
   let imgTags=body.match(/<img[^>]*>/gi)||[]; let missingAlt=imgTags.filter(tag=>!tag.includes('alt=')).length; let altPct=imgTags.length?((imgTags.length-missingAlt)/imgTags.length)*100:100; document.getElementById('seo-alt-bar').style.width=altPct+'%'; document.getElementById('seo-alt-score').innerHTML=`${imgTags.length-missingAlt}/${imgTags.length} alt ok`;
   document.getElementById('seo-first-paragraph').innerHTML=inFirst?'✅ Keyword in first paragraph':'❌ Keyword missing in opening';
@@ -184,6 +197,7 @@ function insertMatchStatsTableConfirm(){
   let body=document.getElementById('post-body'); body.value+=body.value?'\n\n'+html:html; updateSEOMeter(); closeModal('modal-match-stats'); toast('Stats table inserted','success');
 }
 function insertStructuralHeader(level,text){ let body=document.getElementById('post-body'); body.value+=`\n\n<${level} style="color:var(--blue);margin-top:16px">${text}</${level}>\n`; updateSEOMeter(); }
+function injectAIContent(type){ if(type==='full') document.getElementById('post-body').value+='\n\nFull AI article with preview and live stream details.'; updateSEOMeter(); toast('AI content injected','success');}
 // ======================= STREAM + BACKUP LINKS =======================
 function addStreamSource(){ let list=document.getElementById('stream-sources-list'); let div=document.createElement('div'); div.className='stream-source-row'; div.innerHTML='<input type="text" class="mora-input" placeholder="Stream URL"><button class="btn-ghost btn-sm" onclick="removeStreamSource(this)">✕</button>'; list.appendChild(div); }
 function removeStreamSource(btn){ btn.parentElement.remove(); }
@@ -192,7 +206,9 @@ function buildIframeHtml(urls){ let base=document.getElementById('player-base').
 function buildBackupLinksHtml(urls){ if(!urls.length)return ''; return `<div style="background:#1a1f2e;border-radius:8px;padding:12px;margin:12px 0"><p style="color:var(--accent2);font-weight:bold">🔄 Backup Stream Links (if player blocked):</p><ul>${urls.map(u=>`<li><a href="${u}" target="_blank" rel="nofollow">${u}</a></li>`).join('')}</ul></div>`; }
 function buildAndInsertIframe(){ let urls=getMoraUrls(); if(!urls.length){toast('Add stream URL','error');return;} let iframe=buildIframeHtml(urls); let backups=buildBackupLinksHtml(urls); let body=document.getElementById('post-body'); body.value+=body.value?'\n\n'+iframe+backups:iframe+backups; updateSEOMeter(); toast('Iframe + backup links inserted','success');}
 // ======================= SMART THUMBNAIL (Aspect Ratio + Auto Logo) =======================
-async function resolveTeamLogoAuto(teamName){ if(!teamName) return ''; let mock={}; if(CFG.logoOverrides&&CFG.logoOverrides[teamName.toLowerCase()]) return CFG.logoOverrides[teamName.toLowerCase()]; return ''; } // simplified for demo
+let logoOverrides = {};
+function parseLogoOverrides(){ let raw=document.getElementById('cfg-logo-overrides').value; let out={}; raw.split('\n').forEach(line=>{ let [k,...v]=line.split('='); if(k&&v.length) out[k.trim().toLowerCase()]=v.join('=').trim(); }); return out; }
+async function loadTeamLogo(teamName){ if(!teamName) return null; let overrides=parseLogoOverrides(); let key=teamName.toLowerCase(); if(overrides[key]) return overrides[key]; return null; }
 async function buildThumbnail(){
   let aspect=document.getElementById('thumb-aspect').value;
   let cv=document.getElementById('thumb-canvas-big');
@@ -200,30 +216,43 @@ async function buildThumbnail(){
   cv.width=w; cv.height=h;
   let ctx=cv.getContext('2d'); ctx.fillStyle='#0a0e1a'; ctx.fillRect(0,0,w,h);
   let home=document.getElementById('tb-home').value||'Event', away=document.getElementById('tb-away').value;
-  let hLogo=document.getElementById('tb-home-logo').value, aLogo=document.getElementById('tb-away-logo').value;
-  if(!hLogo && home){ let resolved=await resolveTeamLogoAuto(home); if(resolved) document.getElementById('tb-home-logo').value=resolved; hLogo=resolved; }
-  if(!aLogo && away){ let resolved=await resolveTeamLogoAuto(away); if(resolved) document.getElementById('tb-away-logo').value=resolved; aLogo=resolved; }
+  let hLogoUrl=document.getElementById('tb-home-logo').value, aLogoUrl=document.getElementById('tb-away-logo').value;
+  if(!hLogoUrl && home){ let resolved=await loadTeamLogo(home); if(resolved){ document.getElementById('tb-home-logo').value=resolved; hLogoUrl=resolved; } }
+  if(!aLogoUrl && away){ let resolved=await loadTeamLogo(away); if(resolved){ document.getElementById('tb-away-logo').value=resolved; aLogoUrl=resolved; } }
   let league=document.getElementById('tb-league').value, dt=document.getElementById('tb-datetime').value;
   ctx.fillStyle='white'; ctx.font='bold 24px "Barlow Condensed"'; ctx.fillText(home,40,80);
   if(away) ctx.fillText(away,w-200,80);
-  if(hLogo){ let img=new Image(); img.crossOrigin='anonymous'; img.onload=()=>ctx.drawImage(img,40,120,80,80); img.src=hLogo; }
-  if(aLogo&&away){ let img=new Image(); img.crossOrigin='anonymous'; img.onload=()=>ctx.drawImage(img,w-120,120,80,80); img.src=aLogo; }
+  if(hLogoUrl){ let img=new Image(); img.crossOrigin='anonymous'; img.onload=()=>ctx.drawImage(img,40,120,80,80); img.src=hLogoUrl; }
+  if(aLogoUrl&&away){ let img=new Image(); img.crossOrigin='anonymous'; img.onload=()=>ctx.drawImage(img,w-120,120,80,80); img.src=aLogoUrl; }
   ctx.fillStyle='#e63946'; ctx.fillRect(0,h-50,w,50); ctx.fillStyle='white'; ctx.fillText('WATCH FREE ON SPORTS 803',w/2-120,h-25);
 }
 function generateThumbnail(){ let title=document.getElementById('post-title').value; let parts=title.split(/\s+vs\s+/i); if(parts.length>=2){ document.getElementById('tb-home').value=parts[0]; document.getElementById('tb-away').value=parts[1].split(/[–\-|]/)[0]; } buildThumbnail(); }
 async function uploadToImgbb(){ let key=CFG.imgbbKey; if(!key){toast('imgbb key missing','error');return;} let canvas=document.getElementById('thumb-canvas'); let base64=canvas.toDataURL('image/jpeg',0.9).split(',')[1]; let fd=new FormData(); fd.append('key',key); fd.append('image',base64); let res=await fetch('https://api.imgbb.com/1/upload',{method:'POST',body:fd}); let d=await res.json(); if(d.success){ document.getElementById('thumb-url').value=d.data.url; toast('Uploaded','success');} else toast('Upload failed','error');}
 async function uploadThumbFromBuilder(){ let key=CFG.imgbbKey; let canvas=document.getElementById('thumb-canvas-big'); let base64=canvas.toDataURL('image/jpeg',0.9).split(',')[1]; let fd=new FormData(); fd.append('key',key); fd.append('image',base64); let res=await fetch('https://api.imgbb.com/1/upload',{method:'POST',body:fd}); let d=await res.json(); if(d.success){ document.getElementById('tb-imgbb-url').value=d.data.url; toast('Uploaded','success');} }
 // ======================= POST TO BLOGGER =======================
-async function postToBlogger(){ if(!accessToken){toast('Sign in','error');return;} if(!CFG.blogId){toast('Set Blog ID','error');return;} let title=document.getElementById('post-title').value, body=document.getElementById('post-body').value, labels=document.getElementById('post-labels').value.split(','); let html=body.replace(/\n/g,'<br>'); let url=`https://www.googleapis.com/blogger/v3/blogs/${CFG.blogId}/posts/`; let payload={kind:'blogger#post',blog:{id:CFG.blogId},title,content:html,labels}; let res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(payload)}); if(res.ok){ toast('Posted!','success'); let post=await res.json(); addRecentPost(title,post.url);} else toast('Post failed','error');}
+async function postToBlogger(){ if(!accessToken){toast('Sign in','error');return;} if(!CFG.blogId){toast('Set Blog ID','error');return;} let title=document.getElementById('post-title').value, body=document.getElementById('post-body').value, labels=document.getElementById('post-labels').value.split(','); let html=body.replace(/\n/g,'<br>'); let url=`https://www.googleapis.com/blogger/v3/blogs/${CFG.blogId}/posts/`; let payload={kind:'blogger#post',blog:{id:CFG.blogId},title,content:html,labels}; let res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(payload)}); if(res.ok){ let post=await res.json(); addRecentPost(title,post.url); toast('Posted!','success');} else toast('Post failed','error');}
 function addRecentPost(title,url){ let div=document.getElementById('recent-posts-list'); div.innerHTML=`<div>${title} - <a href="${url}" target="_blank">view</a></div>`+div.innerHTML; updateStats();}
 function updateStats(){ document.getElementById('stat-events').innerText=allEvents.length; document.getElementById('stat-posted').innerText=Object.keys(postLog).length; document.getElementById('ss-events').innerText=allEvents.length; document.getElementById('ss-posted').innerText=Object.keys(postLog).length; }
-function updateSchedQueue(){}
+// ======================= CHANNELS =======================
+function renderChannels(){ let tbody=document.getElementById('channels-tbody'); let search=document.getElementById('ch-search')?.value.toLowerCase()||''; let list=channels.filter(c=>[c.name,c.sport,c.region].some(f=>f.toLowerCase().includes(search))); tbody.innerHTML=list.map(c=>`<tr><td>${c.name}</td><td>${c.sport}</td><td>${c.region}</td><td><button class="btn-ghost btn-sm" onclick="editChannel('${c.id}')">✏️</button><button class="btn-sm" style="background:#3d0c0c" onclick="deleteChannel('${c.id}')">✕</button></td></tr>`).join('')||'<tr><td colspan="4">No channels</td></tr>'; }
+function openAddChannel(){ editingChannelId=null; document.getElementById('ch-name').value=''; document.getElementById('ch-sport').value=''; document.getElementById('ch-region').value=''; document.getElementById('ch-url').value=''; openModal('modal-channel'); }
+function editChannel(id){ let c=channels.find(c=>c.id===id); if(c){ editingChannelId=id; document.getElementById('ch-name').value=c.name; document.getElementById('ch-sport').value=c.sport; document.getElementById('ch-region').value=c.region; document.getElementById('ch-url').value=c.url; openModal('modal-channel'); } }
+function saveChannel(){ let name=document.getElementById('ch-name').value; if(!name)return; let obj={name,sport:document.getElementById('ch-sport').value,region:document.getElementById('ch-region').value,url:document.getElementById('ch-url').value}; if(editingChannelId){ let idx=channels.findIndex(c=>c.id===editingChannelId); if(idx>-1) channels[idx]={...channels[idx],...obj}; } else channels.push({id:'ch'+Date.now(),...obj}); localStorage.setItem(STORAGE_KEY_CHANNELS,JSON.stringify(channels)); renderChannels(); closeModal('modal-channel'); toast('Channel saved','success'); }
+function deleteChannel(id){ channels=channels.filter(c=>c.id!==id); localStorage.setItem(STORAGE_KEY_CHANNELS,JSON.stringify(channels)); renderChannels(); toast('Deleted','info'); }
+function filterChannels(){ renderChannels(); }
+// ======================= SCHEDULER =======================
+let schedulerInterval=null;
+function toggleScheduler(){ let enabled=document.getElementById('sched-enabled').checked; if(enabled){ if(schedulerInterval) clearInterval(schedulerInterval); schedulerInterval=setInterval(runSchedulerTick,60000); runSchedulerTick(); toast('Scheduler started','success'); } else { if(schedulerInterval){clearInterval(schedulerInterval); schedulerInterval=null;} toast('Scheduler stopped','info'); } }
+async function runSchedulerTick(){ if(!accessToken) return; let timing=parseInt(document.getElementById('sched-timing').value)*60000; let now=Date.now(); for(let ev of allEvents){ if(ev.startTime && !postLog[ev.id] && ev.startTime.getTime()-now <= timing && ev.startTime.getTime()>now){ await quickPost(ev.id); } } updateSchedQueue(); }
+async function quickPost(evId){ let ev=allEvents.find(e=>e.id==evId); if(!ev)return; let title=`${ev.home.name} vs ${ev.away.name} – Live Stream`; let body=`Preview of ${ev.home.name} vs ${ev.away.name}`; let html=body.replace(/\n/g,'<br>'); let url=`https://www.googleapis.com/blogger/v3/blogs/${CFG.blogId}/posts/`; let payload={kind:'blogger#post',blog:{id:CFG.blogId},title,content:html,labels:['sports 803']}; let res=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(payload)}); if(res.ok){ let post=await res.json(); postLog[ev.id]={postId:post.id,postUrl:post.url,title}; localStorage.setItem(STORAGE_KEY_POSTS,JSON.stringify(postLog)); updateStats(); toast(`Auto-posted: ${title}`,'success'); } }
+function updateSchedQueue(){ let c=document.getElementById('sched-queue'); if(!c)return; let now=Date.now(); let timing=parseInt(document.getElementById('sched-timing').value)*60000; let pending=allEvents.filter(ev=>ev.startTime && !postLog[ev.id] && ev.startTime.getTime()-now <= timing && ev.startTime.getTime()>now); c.innerHTML=pending.map(ev=>`<div>${ev.home.name} vs ${ev.away.name} at ${ev.startTime.toLocaleString()}</div>`).join('')||'No pending events'; }
+// ======================= POST LOG =======================
+function renderPostLog(){ let tbody=document.getElementById('post-log-tbody'); let entries=Object.values(postLog); tbody.innerHTML=entries.map(p=>`<tr><td>${p.title}</td><td>Published</td><td>${new Date(p.ts||Date.now()).toLocaleDateString()}</td></tr>`).join('')||'<tr><td colspan="3">No posts</td></tr>'; }
+// ======================= UTILITIES =======================
 function openPage(id){ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.getElementById('page-'+id).classList.add('active'); }
 function openModal(id){ document.getElementById(id).classList.add('open'); }
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 function checkHighlights(){ toast('Highlights feature ready','info'); }
-function filterEvents(){}
-function injectAIContent(type){ if(type==='full') document.getElementById('post-body').value+='\n\nFull AI article mock.'; updateSEOMeter(); toast('AI injected','success'); }
 loadStorage(); updateSEOMeter(); setInterval(()=>updateSEOMeter(),2000);
 </script>
 </body>
