@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sports803 Dashboard</title>
+
+<style>
+body {
+  margin:0;
+  font-family: Arial, sans-serif;
+  background:#0b0f1a;
+  color:#fff;
+}
+
+header {
+  padding:15px;
+  font-size:20px;
+  font-weight:bold;
+  background:#11182c;
+}
+
+.container {
+  padding:10px;
+}
+
+button {
+  padding:10px 15px;
+  border:none;
+  background:#1e90ff;
+  color:#fff;
+  cursor:pointer;
+  border-radius:6px;
+}
+
+.grid {
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:10px;
+}
+
+.card {
+  background:#12182b;
+  border-radius:10px;
+  padding:10px;
+}
+
+.team {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:5px 0;
+}
+
+.team img {
+  width:32px;
+  height:32px;
+  object-fit:contain;
+}
+
+.placeholder {
+  width:32px;
+  height:32px;
+  background:#333;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+}
+
+.time {
+  font-size:12px;
+  opacity:0.7;
+}
+</style>
+</head>
+
+<body>
+
+<header>Sports803 Live Dashboard</header>
+
+<div class="container">
+  <button onclick="fetchAll()">Fetch All Events</button>
+  <div id="events" class="grid"></div>
+</div>
+
+<script>
+// ================= CONFIG =================
+const ESPN = "https://site.api.espn.com/apis/site/v2/sports";
+const TSDB = "https://www.thesportsdb.com/api/v1/json/3";
+const PROXY = "https://api.allorigins.win/raw?url=";
+
+// ================= LEAGUES =================
+const LEAGUES = [
+  {sport:"soccer", id:"eng.1"},
+  {sport:"soccer", id:"spain.1"},
+  {sport:"soccer", id:"germany.1"},
+  {sport:"soccer", id:"italy.1"},
+  {sport:"soccer", id:"france.1"},
+
+  {sport:"soccer", id:"fifa.world"},
+  {sport:"soccer", id:"uefa.euro"},
+  {sport:"soccer", id:"caf.afcon"},
+
+  {sport:"soccer", id:"fifa.womens.world.cup"},
+  {sport:"soccer", id:"eng.wsl"},
+
+  {sport:"basketball", id:"nba"},
+  {sport:"mma", id:"ufc"},
+  {sport:"cricket", id:"cricket"}
+];
+
+// ================= CACHE =================
+const CACHE_KEY="s803_logo_cache";
+
+function getCache(){
+  return JSON.parse(localStorage.getItem(CACHE_KEY)||"{}");
+}
+function setCache(n,u){
+  let c=getCache(); c[n.toLowerCase()]=u;
+  localStorage.setItem(CACHE_KEY,JSON.stringify(c));
+}
+function getCached(n){
+  return getCache()[n.toLowerCase()]||"";
+}
+
+// ================= NAME FIX =================
+function fixName(n){
+  const map={
+    "man utd":"Manchester United",
+    "psg":"Paris Saint-Germain",
+    "barca":"Barcelona"
+  };
+  return map[n.toLowerCase()]||n;
+}
+
+// ================= FETCH HELPERS =================
+async function tsdb(name){
+  try{
+    let r=await fetch(`${TSDB}/searchteams.php?t=${encodeURIComponent(name)}`);
+    let d=await r.json();
+    return d?.teams?.[0]?.strTeamBadge||"";
+  }catch{return "";}
+}
+
+async function fighter(name){
+  try{
+    let r=await fetch(`${TSDB}/searchplayers.php?p=${encodeURIComponent(name)}`);
+    let d=await r.json();
+    return d?.player?.[0]?.strThumb||"";
+  }catch{return "";}
+}
+
+function cricketFlag(n){
+  return `https://flagcdn.com/w80/${n.slice(0,2).toLowerCase()}.png`;
+}
+
+// ================= LOGO RESOLVER =================
+async function resolveLogo(url,name,league){
+  name=fixName(name);
+
+  let cached=getCached(name);
+  if(cached) return cached;
+
+  if(url){
+    setCache(name,url);
+    return url;
+  }
+
+  if(league==="ufc"){
+    let f=await fighter(name);
+    if(f) return f;
+  }
+
+  if(league==="cricket"){
+    return cricketFlag(name);
+  }
+
+  let t=await tsdb(name);
+  if(t){
+    setCache(name,t);
+    return t;
+  }
+
+  return "";
+}
+
+// ================= FETCH EVENTS =================
+async function fetchAll(){
+  let all=[];
+
+  for(let l of LEAGUES){
+    try{
+      let r=await fetch(`${ESPN}/${l.sport}/${l.id}/scoreboard`);
+      let d=await r.json();
+
+      d.events?.forEach(e=>{
+        let comp=e.competitions?.[0];
+        let t=comp?.competitors||[];
+
+        if(t.length===2){
+          all.push({
+            league:l.id,
+            time:e.date,
+            home:{
+              name:t[0].team.displayName,
+              logo:t[0].team.logo
+            },
+            away:{
+              name:t[1].team.displayName,
+              logo:t[1].team.logo
+            }
+          });
+        }
+      });
+
+    }catch{}
+  }
+
+  // resolve logos in parallel
+  await Promise.all(all.map(async ev=>{
+    ev.home.logo=await resolveLogo(ev.home.logo,ev.home.name,ev.league);
+    ev.away.logo=await resolveLogo(ev.away.logo,ev.away.name,ev.league);
+  }));
+
+  render(all);
+}
+
+// ================= RENDER =================
+function render(events){
+  const el=document.getElementById("events");
+  el.innerHTML="";
+
+  events.forEach(ev=>{
+    el.innerHTML+=`
+    <div class="card">
+      <div class="team">${logo(ev.home)} ${ev.home.name}</div>
+      <div>vs</div>
+      <div class="team">${logo(ev.away)} ${ev.away.name}</div>
+      <div class="time">${new Date(ev.time).toLocaleString()}</div>
+    </div>`;
+  });
+}
+
+// ================= LOGO UI =================
+function logo(t){
+  if(t.logo){
+    return `<img src="${PROXY+encodeURIComponent(t.logo)}">`;
+  }
+  return `<div class="placeholder">${t.name[0]}</div>`;
+}
+</script>
+
+</body>
+</html>
