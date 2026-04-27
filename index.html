@@ -474,7 +474,6 @@ const ThumbMgr=(()=>{
   const bg=document.getElementById('thumb-bg');
   function init(){
     if(!thumbP)return;
-    // validate it looks like a safe http(s) image URL
     try{const u=new URL(thumbP);if(!['http:','https:'].includes(u.protocol))return;}catch{return;}
     bg.style.backgroundImage=`url(${thumbP})`;
     bg.classList.add('on');
@@ -679,7 +678,6 @@ function setLoading(on,txt='Loading stream…',pct){
   if(on&&pct!==undefined){D.loadProg.classList.add('on');D.loadFill.style.width=Math.min(100,Math.max(0,pct))+'%';}
   else if(!on){D.loadProg.classList.remove('on');D.loadFill.style.width='0%';}
   if(on)appState='loading';
-  // Show/hide thumb bg with loading state
   if(on)ThumbMgr.show(); else if(appState==='playing')ThumbMgr.hide();
 }
 
@@ -773,10 +771,9 @@ function setQuality(items,handler){
   items.forEach((item,i)=>{const o=document.createElement('option');o.value=i;o.textContent=item.label;sel.appendChild(o);});
   sel.classList.remove('hidden');
   qualH=(v)=>{if(items[v])handler(items[v].value??v);else handler(v);};
-  // If low-data mode active, auto-select lowest quality
   if(Prefs.getLowData()){
     const lowest=items.length-1;
-    if(qualH)qualH(0); // lowest bitrate is usually first after sort
+    if(qualH)qualH(0);
   }
   GA.send('quality_levels_available',{levels_count:items.length,adapter_name:curAdapter,levels_list:items.map(i=>i.label).join(',')});
 }
@@ -793,7 +790,6 @@ D.btnLowdata.addEventListener('click',()=>{
   Prefs.setLowData(newVal);
   D.btnLowdata.classList.toggle('active-toggle',newVal);
   toast(newVal?'Low data mode ON':'Low data mode OFF');
-  // Apply to current quality if available
   if(newVal&&qualH){
     const opts=D.qualSel.options;
     if(opts.length>1){const idx=opts.length-1;D.qualSel.value=String(idx-1);qualH(idx-1);}
@@ -814,7 +810,6 @@ function buildBtns(list){
     btn.type='button';btn.className='s-btn';btn.dataset.i=i;
     btn.title=label;
 
-    // health dot + optional thumb image + icon/label
     const healthDot=document.createElement('span');
     healthDot.className='health-dot grey';
     btn.appendChild(healthDot);
@@ -904,14 +899,17 @@ function clearHost(){
   instances=[];D.host.innerHTML='';D.host.style.display='none';
   curPlayer=null;setOverlay(false);hideQuality();
 }
+
+/* ── PATCH 1: newVid injects poster=thumbP on all video elements ── */
 function newVid(a={}){
   const v=document.createElement('video');
   v.style.cssText='width:100%;height:100%;display:block;background:#000;';
-  Object.entries({autoplay:false,playsinline:true,...a}).forEach(([k,val])=>{
+  Object.entries({autoplay:false,playsinline:true,...(thumbP&&{poster:thumbP}),...a}).forEach(([k,val])=>{
     if(val===true)v.setAttribute(k,'');else if(val!==false)v.setAttribute(k,val);
   });
   return v;
 }
+
 async function safePlay(v){try{await v.play();}catch(e){if(e&&(e.name==='AbortError'||e.name==='NotAllowedError'))return;throw e;}}
 
 /* ── Proxy ───────────────────────────────────────────── */
@@ -1014,8 +1012,8 @@ function loadSc(src){if(_sc.has(src))return _sc.get(src);const p=new Promise((re
 const HealthMon=(()=>{
   let _timer=null,_lastTime=0,_stallCount=0,_vid=null,_idx=0,_recovery=false;
   const HEALTH_INTERVAL=15000;
-  const STALL_THRESH=10; // seconds no advance = stall
-  const LATENCY_WARN=15; // seconds drift before showing jump-to-live
+  const STALL_THRESH=10;
+  const LATENCY_WARN=15;
 
   function _getLiveEdge(v){
     if(!v||!v.buffered||v.buffered.length===0)return null;
@@ -1028,7 +1026,6 @@ const HealthMon=(()=>{
     const ct=v.currentTime;
     const edge=_getLiveEdge(v);
 
-    // Latency indicator
     if(edge!==null){
       const drift=edge-ct;
       if(drift>3){
@@ -1038,7 +1035,6 @@ const HealthMon=(()=>{
       }else{
         D.latencyBadge.classList.remove('on');
       }
-      // Jump to live button
       if(drift>LATENCY_WARN){
         D.jumpLiveBtn.classList.add('on');
       }else{
@@ -1046,13 +1042,11 @@ const HealthMon=(()=>{
       }
     }
 
-    // Stall detection
     if(Math.abs(ct-_lastTime)<0.1&&!v.paused&&!v.seeking){
       _stallCount++;
       if(_stallCount>=1){setHealthDot(_idx,'amber');}
       if(_stallCount*HEALTH_INTERVAL/1000>=STALL_THRESH&&!_recovery){
         _recovery=true;setHealthDot(_idx,'red');
-        // Silent recovery attempt
         try{const p=ct;v.load();v.currentTime=p+0.5;safePlay(v).then(()=>{_recovery=false;_stallCount=0;}).catch(()=>{});}catch{}
       }
     }else{
@@ -1066,7 +1060,6 @@ const HealthMon=(()=>{
       HealthMon.stop();
       _vid=vid;_idx=idx;_lastTime=vid.currentTime||0;_stallCount=0;_recovery=false;
       _timer=setInterval(_tick,HEALTH_INTERVAL);
-      // Apply saved volume
       const savedVol=Prefs.getSavedVol();
       const savedMute=Prefs.getSavedMute();
       vid.volume=savedMute?0:savedVol/100;
@@ -1077,7 +1070,6 @@ const HealthMon=(()=>{
       clearInterval(_timer);_timer=null;_vid=null;
       D.latencyBadge.classList.remove('on');
       D.jumpLiveBtn.classList.remove('on');
-      // Reset all health dots
       btnEls.forEach((_,i)=>setHealthDot(i,'grey'));
     },
     jumpToLive(){
@@ -1114,7 +1106,6 @@ const ScoreBoard=(()=>{
     b=b.toLowerCase().replace(/[^a-z0-9]/g,'');
     if(a===b)return 1;
     if(a.includes(b)||b.includes(a))return 0.8;
-    // simple overlap score
     let hits=0;for(let i=0;i<Math.min(a.length,b.length);i++)if(a[i]===b[i])hits++;
     return hits/Math.max(a.length,b.length);
   }
@@ -1140,7 +1131,7 @@ const ScoreBoard=(()=>{
     if(!best||bestScore<0.5)return null;
     const comp=best.competitions[0];
     const status=best.status;
-    const state=status?.type?.state||'pre'; // pre, in, post
+    const state=status?.type?.state||'pre';
     const period=status?.period||0;
     const clock=status?.displayClock||'0:00';
     const isHT=status?.type?.shortDetail?.toLowerCase().includes('half');
@@ -1183,7 +1174,6 @@ const ScoreBoard=(()=>{
   }
 
   async function _fetchTSDB(){
-    // TheSportsDB — search by team name
     try{
       const ac=new AbortController();
       const t=setTimeout(()=>ac.abort(),8000);
@@ -1259,7 +1249,6 @@ const ScoreBoard=(()=>{
     }else if(m.state==='post'){
       badgeHtml='<span class="sc-badge ft">FT</span>';
     }else{
-      // pre — show time if available
       badgeHtml='<span class="sc-badge ft">PRE</span>';
     }
 
@@ -1338,7 +1327,6 @@ const ScoreBoard=(()=>{
 
   return{
     init(){
-      // Run asynchronously — never blocks playback
       setTimeout(()=>_poll(),500);
     }
   };
@@ -1469,7 +1457,8 @@ const ADAPTERS=[
   {name:'jwplayer',pri:1,supports:()=>typeof jwplayer!=='undefined',async load(){},
     init(hid,s){return withTO(new Promise((res,rej)=>{
       const el=document.createElement('div');el.id=hid+'_jw';document.getElementById(hid).appendChild(el);
-      const p=jwplayer(el.id).setup({file:s.url,type:s.type==='hls'?'hls':'dash',width:'100%',height:'100%',autostart:!isIOS(),mute:isIOS(),hlshtml:true,primary:'html5',image:'https://cdn.jwplayer.com/images/6cbPZG9A.png',skin:{name:'netflix'},cast:{},stretching:'uniform',...(s.drm?{drm:{clearkey:{keyId:s.drm.keyId,key:s.drm.key}}}:{})});
+      /* PATCH 2: use thumbP as JWPlayer poster image */
+      const p=jwplayer(el.id).setup({file:s.url,type:s.type==='hls'?'hls':'dash',width:'100%',height:'100%',autostart:!isIOS(),mute:isIOS(),hlshtml:true,primary:'html5',image:thumbP||'https://cdn.jwplayer.com/images/6cbPZG9A.png',skin:{name:'netflix'},cast:{},stretching:'uniform',...(s.drm?{drm:{clearkey:{keyId:s.drm.keyId,key:s.drm.key}}}:{})});
       let done=false;
       p.on('ready',()=>{if(done)return;done=true;instances.push(p);curPlayer=p;
         const lv=p.getQualityLevels();
@@ -1632,7 +1621,6 @@ async function playStream(stream,gen){
     setOverlay(needOv);if(needOv)D.pbBar.classList.add('on');
     setLoading(false);setBadge(stream);setActivBtn(curIdx);
     ThumbMgr.hide();
-    // Apply saved volume to the video element
     if(curPlayer instanceof HTMLVideoElement){
       const savedVol=Prefs.getSavedVol();
       const savedMute=Prefs.getSavedMute();
@@ -1640,7 +1628,6 @@ async function playStream(stream,gen){
       curPlayer.muted=savedMute;
       D.volSl.value=String(savedMute?0:savedVol);
     }
-    // Start health monitor
     if(curPlayer instanceof HTMLVideoElement){
       HealthMon.start(curPlayer,curIdx);
     }
@@ -1724,7 +1711,6 @@ function refresh(trigger='button'){
 }
 
 async function go(idx){
-  // Offline check — don't burn retries when offline
   if(!_isOnline){_offlineResumeNeeded=true;return;}
   cancelAutoNextSwitch('navigation');
   if(!streams.length)return;
@@ -1858,7 +1844,6 @@ function handleErrorFallback(){
   }
   buildBtns(streams);
 
-  // Start score board — fully async, never blocks playback
   ScoreBoard.init();
 
   let savedIdx=0;
